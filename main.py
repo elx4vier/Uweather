@@ -197,6 +197,10 @@ class WeatherListener(EventListener):
         else:
             icon_file = "partial.png"
 
+        # fallback padrão para loading ou ausência de ícone
+        if not icon_file or not os.path.exists(extension.icon(icon_file)):
+            icon_file = "icon.png"
+
         description = (
             f"Amanhã: {forecast[0]['min']}º / {forecast[0]['max']}º {self.weather_emoji(forecast[0]['code'])} | "
             f"Depois: {forecast[1]['min']}º / {forecast[1]['max']}º {self.weather_emoji(forecast[1]['code'])} "
