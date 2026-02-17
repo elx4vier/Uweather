@@ -30,13 +30,15 @@ class UWeather(Extension):
         self.session = create_session()
         self.cache = {}
         self.base_path = os.path.dirname(os.path.abspath(__file__))
+        self.icon_path = os.path.join(self.base_path, "images", "icon.png")  # ícone padrão da extensão
 
         # pré-busca assíncrona do clima atual
         threading.Thread(target=self.preload_weather, daemon=True).start()
 
     def icon(self, filename):
+        """Retorna o caminho do ícone ou fallback para ícone padrão"""
         path = os.path.join(self.base_path, "images", filename)
-        return path if os.path.exists(path) else ""
+        return path if os.path.exists(path) else self.icon_path
 
     def preload_weather(self):
         """Pré-busca o clima da localização atual e salva no cache"""
@@ -207,18 +209,16 @@ class WeatherListener(EventListener):
         else:
             icon_file = "partial.png"
 
-        # fallback padrão para loading ou ausência de ícone
-        if not icon_file or not os.path.exists(extension.icon(icon_file)):
-            icon_file = "icon.png"
+        icon_file = extension.icon(icon_file)  # garante fallback
 
         description = (
             f"Amanhã: {forecast[0]['min']}º / {forecast[0]['max']}º {self.weather_emoji(forecast[0]['code'])} | "
             f"Depois: {forecast[1]['min']}º / {forecast[1]['max']}º {self.weather_emoji(forecast[1]['code'])} "
-            " "  # espaço sutil
+            " "
         )
         return RenderResultListAction([
             ExtensionResultItem(
-                icon=extension.icon(icon_file),
+                icon=icon_file,
                 name=f"{data['city']}\n{data['current']['temp']}º — {data['current']['text']}",
                 description=description,
                 on_enter=None
