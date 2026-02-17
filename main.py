@@ -28,10 +28,10 @@ class UWeather(Extension):
         super().__init__()
         self.subscribe(KeywordQueryEvent, WeatherListener())
         self.session = create_session()
-        self.cache = {}  # {"key": (data, timestamp)}
+        self.cache = {}
         self.base_path = os.path.dirname(os.path.abspath(__file__))
 
-        # inicia pré-busca assíncrona
+        # pré-busca assíncrona do clima atual
         threading.Thread(target=self.preload_weather, daemon=True).start()
 
     def icon(self, filename):
@@ -45,8 +45,13 @@ class UWeather(Extension):
             if not api_key:
                 return
             geo = WeatherListener().fetch_location(self)
-            data = WeatherListener().fetch_weather(lat=geo["latitude"], lon=geo["longitude"],
-                                                   city_name=geo.get("city"), api_key=api_key, session=self.session)
+            data = WeatherListener().fetch_weather(
+                lat=geo["latitude"],
+                lon=geo["longitude"],
+                city_name=geo.get("city"),
+                api_key=api_key,
+                session=self.session
+            )
             self.cache["auto"] = (data, time.time())
         except Exception as e:
             logger.error(f"Pré-busca falhou: {e}")
@@ -54,22 +59,13 @@ class UWeather(Extension):
 
 class WeatherListener(EventListener):
 
-    EMOJI_MAP = {
-        "clear": "☀️",
-        "clouds": "☁️",
-        "rain": "🌧️",
-        "snow": "❄️",
-        "thunderstorm": "⛈️",
-        "partial": "🌤️"
-    }
-
     def weather_emoji(self, code):
-        if code < 300: return self.EMOJI_MAP["thunderstorm"]
-        elif code < 600: return self.EMOJI_MAP["rain"]
-        elif code < 700: return self.EMOJI_MAP["snow"]
-        elif code == 800: return self.EMOJI_MAP["clear"]
-        elif code <= 804: return self.EMOJI_MAP["clouds"]
-        else: return self.EMOJI_MAP["partial"]
+        if code < 300: return "⛈️"
+        elif code < 600: return "🌧️"
+        elif code < 700: return "❄️"
+        elif code == 800: return "☀️"
+        elif code <= 804: return "☁️"
+        else: return "🌤️"
 
     def weather_text(self, code):
         if code < 300: return "Tempestade"
@@ -88,23 +84,26 @@ class WeatherListener(EventListener):
             city_query = event.get_argument()
             cache_key = (city_query.lower().strip() if city_query else "auto")
 
-            # Verifica cache
+            # verifica cache
             if cache_key in extension.cache:
                 data, ts = extension.cache[cache_key]
                 if time.time() - ts < CACHE_TTL:
                     return self.render_weather(data, extension)
 
-            # Busca dados
+            # busca dados
             if city_query:
                 data = self.fetch_weather(city=city_query, api_key=api_key, session=extension.session)
             else:
                 geo = self.fetch_location(extension)
-                data = self.fetch_weather(lat=geo["latitude"], lon=geo["longitude"],
-                                          city_name=geo.get("city"), api_key=api_key, session=extension.session)
+                data = self.fetch_weather(
+                    lat=geo["latitude"],
+                    lon=geo["longitude"],
+                    city_name=geo.get("city"),
+                    api_key=api_key,
+                    session=extension.session
+                )
 
-            # Atualiza cache
             extension.cache[cache_key] = (data, time.time())
-
             return self.render_weather(data, extension)
 
         except Exception as e:
@@ -157,7 +156,7 @@ class WeatherListener(EventListener):
                 daily[date]["max"] = max(daily[date]["max"], temp_max)
                 daily[date]["min"] = min(daily[date]["min"], temp_min)
 
-        # Previsão amanhã + depois
+        # previsão amanhã + depois
         sorted_dates = sorted(daily.keys())
         forecast = []
         for date in sorted_dates[1:3]:
@@ -182,6 +181,22 @@ class WeatherListener(EventListener):
     # =====================
     def render_weather(self, data, extension):
         forecast = data["forecast"]
+        current_code = data['current']['code']
+
+        # ícone dinâmico baseado no código do clima
+        if current_code < 300:
+            icon_file = "thunderstorm.png"
+        elif current_code < 600:
+            icon_file = "rain.png"
+        elif current_code < 700:
+            icon_file = "snow.png"
+        elif current_code == 800:
+            icon_file = "clear.png"
+        elif current_code <= 804:
+            icon_file = "clouds.png"
+        else:
+            icon_file = "partial.png"
+
         description = (
             f"Amanhã: {forecast[0]['min']}º / {forecast[0]['max']}º {self.weather_emoji(forecast[0]['code'])} | "
             f"Depois: {forecast[1]['min']}º / {forecast[1]['max']}º {self.weather_emoji(forecast[1]['code'])} "
@@ -189,7 +204,7 @@ class WeatherListener(EventListener):
         )
         return RenderResultListAction([
             ExtensionResultItem(
-                icon=extension.icon("icon.png"),  # ícone principal
+                icon=extension.icon(icon_file),
                 name=f"{data['city']}\n{data['current']['temp']}º — {data['current']['text']}",
                 description=description,
                 on_enter=None
