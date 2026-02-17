@@ -1,20 +1,19 @@
 {
-    "required_api_version": "2",
-    "manifest_version": "1",
-    "name": "Onde estou?",
-    "description": "Mostra sua localização atual baseada no IP (cidade, estado e país)",
-    "developer_name": "Xavier",
-    "icon": "images/icon.png",
-    "options": {
-        "query_debounce": 0.1
-    },
-    "preferences": [
-        {
-            "id": "kw",
-            "type": "keyword",
-            "name": "Palavra-chave",
-            "description": "Digite a palavra-chave para ativar a extensão",
-            "default_value": "onde"
-        }
-    ]
+  "manifest_version": "2",
+  "name": "UWeather",
+  "display_name": "UWeather - Clima Atual + 3 Dias",
+  "description": "Mostra o clima atual e previsão de 3 dias automaticamente pela sua localização.",
+  "developer_name": "Xavier",
+  "icon": "images/sun.png",
+  "options": {
+    "query_debounce": 0.1
+  },
+  "preferences": [
+    {
+      "id": "keyword",
+      "type": "keyword",
+      "name": "Palavra-chave",
+      "default_value": "clima"
+    }
+  ]
 }
