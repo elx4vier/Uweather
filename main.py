@@ -11,7 +11,6 @@ from ulauncher.api.client.EventListener import EventListener
 from ulauncher.api.shared.event import KeywordQueryEvent
 from ulauncher.api.shared.item.ExtensionResultItem import ExtensionResultItem
 from ulauncher.api.shared.action.RenderResultListAction import RenderResultListAction
-from ulauncher.api.shared.action.CopyToClipboardAction import CopyToClipboardAction
 
 logger = logging.getLogger(__name__)
 CACHE_TTL = 300  # 5 minutos
@@ -31,7 +30,7 @@ class UWeather(Extension):
         super().__init__()
         self.subscribe(KeywordQueryEvent, WeatherListener())
         self.session = create_session()
-        self.cache = {}
+        self.cache = {}  # cache por cidade
         self.base_path = os.path.dirname(os.path.abspath(__file__))
 
     def icon(self, filename):
@@ -55,6 +54,20 @@ class WeatherListener(EventListener):
         else:
             return "🌤️"
 
+    def weather_text(self, code):
+        if code == 0:
+            return "Céu limpo"
+        elif code in [1, 2, 3, 45, 48]:
+            return "Nublado"
+        elif code in [51, 53, 55, 61, 63, 65]:
+            return "Chuva"
+        elif code in [71, 73, 75]:
+            return "Neve"
+        elif code in [95, 96, 99]:
+            return "Tempestade"
+        else:
+            return "Parcialmente nublado"
+
     def on_event(self, event, extension):
         try:
             city_query = event.get_argument()
@@ -72,15 +85,14 @@ class WeatherListener(EventListener):
                 data = self.fetch_all(extension, city_query)
                 extension.cache[cache_key] = (data, now)
 
-            # Monta o bloco único
             texto = self.format_block(data)
 
             return RenderResultListAction([
                 ExtensionResultItem(
                     icon=extension.icon("sun.png"),
                     name=texto,
-                    description="Pressione Enter para copiar",
-                    on_enter=CopyToClipboardAction(texto)
+                    description="",  # sem texto adicional
+                    on_enter=None
                 )
             ])
 
@@ -120,8 +132,7 @@ class WeatherListener(EventListener):
         if r.status_code != 200:
             raise Exception("Cidade não encontrada.")
 
-        data = r.json()
-        return self.parse_openweather(data)
+        return self.parse_openweather(r.json())
 
     # =============================
     # BUSCA POR COORDENADAS
@@ -164,6 +175,7 @@ class WeatherListener(EventListener):
             f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
             "&current_weather=true"
             "&daily=weathercode,temperature_2m_max,temperature_2m_min"
+            "&hourly=temperature_2m,weathercode"
             "&timezone=auto"
         )
         r = extension.session.get(url, timeout=5)
@@ -171,8 +183,10 @@ class WeatherListener(EventListener):
             raise Exception("Open-Meteo falhou")
 
         data = r.json()
+
+        # Forecast próximo 3 dias
         forecast = []
-        for i in range(1, 3 + 1):
+        for i in range(1, 4):
             forecast.append({
                 "date": data["daily"]["time"][i],
                 "max": data["daily"]["temperature_2m_max"][i],
@@ -180,14 +194,26 @@ class WeatherListener(EventListener):
                 "code": data["daily"]["weathercode"][i]
             })
 
+        # Próximas horas (próximas 3 da hora atual)
+        next_hours = []
+        hourly_temp = data.get("hourly", {}).get("temperature_2m", [])
+        hourly_code = data.get("hourly", {}).get("weathercode", [])
+        for i in range(min(3, len(hourly_temp))):
+            next_hours.append({
+                "time": f"{i*3+12}:00",
+                "temp": hourly_temp[i],
+                "code": hourly_code[i]
+            })
+
         return {
             "city": city or "Localização atual",
             "current": {
                 "temp": data["current_weather"]["temperature"],
-                "wind": data["current_weather"]["windspeed"],
-                "code": data["current_weather"]["weathercode"]
+                "code": data["current_weather"]["weathercode"],
+                "sensacao": data["current_weather"]["temperature"]
             },
-            "forecast": forecast
+            "forecast": forecast,
+            "hours": next_hours
         }
 
     # =============================
@@ -221,70 +247,47 @@ class WeatherListener(EventListener):
                 used_dates.add(date)
             if len(forecast) == 3:
                 break
+
         return {
             "city": data["city"]["name"],
             "current": {
                 "temp": current["main"]["temp"],
-                "wind": current["wind"]["speed"],
-                "code": 1
+                "code": 1,
+                "sensacao": current["main"]["feels_like"] if "feels_like" in current["main"] else current["main"]["temp"]
             },
-            "forecast": forecast
+            "forecast": forecast,
+            "hours": [
+                {"time": item["dt_txt"].split(" ")[1][:5],
+                 "temp": item["main"]["temp"],
+                 "code": 1} for item in data["list"][:3]
+            ]
         }
 
     # =============================
-    # FORMATAÇÃO EM BLOCO ÚNICO
+    # FORMATAÇÃO CLEAN VERTICAL
     # =============================
 
     def format_block(self, data):
         cur = data["current"]
+        hours = data.get("hours", [])
         fcs = data["forecast"]
 
-        block = f"Clima em {data['city']} agora:\n\n"
-        block += f"{cur['temp']}º\n"
-        block += f"{self.weather_text(cur['code'])}\n"
-        block += f"Sensação térmica: {cur['temp']}º\n\n"
+        block = f"{data['city']} — {cur['temp']}º {self.weather_emoji(cur['code'])}\n"
+        block += f"{self.weather_text(cur['code'])} | Sensação: {cur['sensacao']}º\n\n"
 
-        # Próximas horas (usando forecast OpenWeatherMap lista)
-        next_hours = []
-        for i, hour in enumerate(fcs[:3]):
-            next_hours.append(f"{hour['date']} - {hour['max']}º {self.weather_emoji(hour['code'])}")
-        block += "Próximas horas: " + " | ".join(next_hours) + "\n\n"
+        block += "Próximas horas:\n"
+        for h in hours:
+            block += f"{h['time']} - {h['temp']}º {self.weather_emoji(h['code'])}\n"
+        block += "\n"
 
-        # Dias
-        dias = ["Amanhã", "Depois de amanhã", "Depois de depois de amanhã"]
+        dias = ["Amanhã", "Depois"]
         for i, day in enumerate(fcs):
-            block += f"{dias[i]}: máx {day['max']}º {self.weather_emoji(day['code'])} / min {day['min']}º {self.weather_emoji(day['code'])}\n"
+            if i >= len(dias):
+                break
+            block += f"{dias[i]}: {day['max']}º / {day['min']}º {self.weather_emoji(day['code'])}\n"
 
         block += "\nFonte: OpenWeatherMap"
         return block
-
-    def weather_text(self, code):
-        if code == 0:
-            return "Céu limpo"
-        elif code in [1, 2, 3, 45, 48]:
-            return "Nublado"
-        elif code in [51, 53, 55, 61, 63, 65]:
-            return "Chuva"
-        elif code in [71, 73, 75]:
-            return "Neve"
-        elif code in [95, 96, 99]:
-            return "Tempestade"
-        else:
-            return "Parcialmente nublado"
-
-    def get_icon(self, code):
-        if code == 0:
-            return "sun.png"
-        elif code in [1, 2, 3, 45, 48]:
-            return "cloud.png"
-        elif code in [51, 53, 55, 61, 63, 65]:
-            return "rain.png"
-        elif code in [71, 73, 75]:
-            return "snow.png"
-        elif code in [95, 96, 99]:
-            return "storm.png"
-        else:
-            return "cloud.png"
 
 
 if __name__ == "__main__":
