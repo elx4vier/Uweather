@@ -11,7 +11,6 @@ from ulauncher.api.client.EventListener import EventListener
 from ulauncher.api.shared.event import KeywordQueryEvent
 from ulauncher.api.shared.item.ExtensionResultItem import ExtensionResultItem
 from ulauncher.api.shared.action.RenderResultListAction import RenderResultListAction
-from ulauncher.api.shared.action.CopyToClipboardAction import CopyToClipboardAction
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +30,11 @@ def create_session():
     return session
 
 
-class OndeEstouExtension(Extension):
+class UWeather(Extension):
 
     def __init__(self):
         super().__init__()
-        self.subscribe(KeywordQueryEvent, KeywordQueryEventListener())
+        self.subscribe(KeywordQueryEvent, WeatherListener())
 
         self.session = create_session()
         self.cache = None
@@ -47,95 +46,110 @@ class OndeEstouExtension(Extension):
         return path if os.path.exists(path) else ""
 
 
-class KeywordQueryEventListener(EventListener):
+class WeatherListener(EventListener):
 
     def on_event(self, event, extension):
-
         try:
             now = time.time()
 
-            # Cache
             if extension.cache and (now - extension.cache_time < CACHE_TTL):
-                geo = extension.cache
+                data = extension.cache
             else:
-                geo = self.fetch_location(extension)
-                extension.cache = geo
+                data = self.fetch_all(extension)
+                extension.cache = data
                 extension.cache_time = now
 
+            geo = data["geo"]
+            weather = data["weather"]
+
             cidade = geo.get("city", "Desconhecida")
-            estado = geo.get("region", "")
-            country_name = geo.get("country_name", geo.get("country", ""))
-            country_code = geo.get("country_code", geo.get("countryCode", "")).upper()
-            ip = geo.get("ip", geo.get("query", ""))
 
-            # Preferências
-            mostrar_estado = extension.preferences.get("mostrar_estado", "sim")
-            mostrar_bandeira = extension.preferences.get("mostrar_bandeira", "sim")
-            copiar_formato = extension.preferences.get("formato_copia", "cidade_estado_pais")
-            mostrar_ip = extension.preferences.get("mostrar_ip", "sim")
+            current = weather["current_weather"]
+            temp = current.get("temperature", "?")
+            wind = current.get("windspeed", "?")
+            code = current.get("weathercode", 0)
 
-            bandeira = self.flag(country_code) if mostrar_bandeira == "sim" else ""
+            forecast = weather["daily"]
 
-            linha_estado = f"{estado}\n" if estado and mostrar_estado == "sim" else ""
-            linha_ip = f"\nIP: {ip}" if ip and mostrar_ip == "sim" else ""
+            results = []
 
-            texto = (
-                "Sua localização atual é:\n\n"
-                f"{cidade}\n"
-                f"{linha_estado}"
-                f"{country_name} {bandeira}\n"
-                f"{linha_ip}"
+            # Clima atual
+            results.append(
+                ExtensionResultItem(
+                    icon=extension.icon(self.get_icon(code)),
+                    name=f"{cidade} agora: {temp}°C",
+                    description=f"Vento: {wind} km/h",
+                    on_enter=None
+                )
             )
 
-            rodape = "Fonte: ipapi.co | ip-api.com"
+            # Próximos 3 dias
+            for i in range(1, 4):
+                date = forecast["time"][i]
+                tmax = forecast["temperature_2m_max"][i]
+                tmin = forecast["temperature_2m_min"][i]
+                code = forecast["weathercode"][i]
 
-            # Formato de cópia
-            if copiar_formato == "cidade":
-                copia = cidade
-            elif copiar_formato == "cidade_pais":
-                copia = f"{cidade}, {country_name}"
-            elif copiar_formato == "ip":
-                copia = ip
-            else:
-                copia = f"{cidade}, {estado}, {country_name}"
-
-            return RenderResultListAction([
-                ExtensionResultItem(
-                    icon=extension.icon("icon.png"),
-                    name=texto.strip(),
-                    description=rodape,
-                    on_enter=CopyToClipboardAction(copia)
+                results.append(
+                    ExtensionResultItem(
+                        icon=extension.icon(self.get_icon(code)),
+                        name=f"{date}",
+                        description=f"Máx: {tmax}°C | Mín: {tmin}°C",
+                        on_enter=None
+                    )
                 )
-            ])
+
+            return RenderResultListAction(results)
 
         except Exception as e:
-            logger.error(f"Erro localização: {e}")
+            logger.error(f"Erro clima: {e}")
 
             return RenderResultListAction([
                 ExtensionResultItem(
                     icon=extension.icon("error.png"),
-                    name="Erro ao obter localização",
+                    name="Erro ao obter clima",
                     description="Verifique sua conexão",
-                    on_enter=CopyToClipboardAction("Erro")
+                    on_enter=None
                 )
             ])
 
+    def fetch_all(self, extension):
+        geo = self.fetch_location(extension)
+
+        lat = geo.get("latitude")
+        lon = geo.get("longitude")
+
+        url = (
+            "https://api.open-meteo.com/v1/forecast"
+            f"?latitude={lat}&longitude={lon}"
+            "&current_weather=true"
+            "&daily=weathercode,temperature_2m_max,temperature_2m_min"
+            "&timezone=auto"
+        )
+
+        r = extension.session.get(url, timeout=3)
+        weather = r.json()
+
+        return {"geo": geo, "weather": weather}
+
     def fetch_location(self, extension):
+        r = extension.session.get("https://ipapi.co/json/", timeout=2)
+        return r.json()
 
-        try:
-            r = extension.session.get("https://ipapi.co/json/", timeout=2)
-            if r.status_code == 200:
-                return r.json()
-            raise Exception("API principal falhou")
-        except Exception:
-            r = extension.session.get("http://ip-api.com/json/", timeout=2)
-            return r.json()
-
-    def flag(self, code):
-        if len(code) != 2:
-            return ""
-        return chr(ord(code[0]) + 127397) + chr(ord(code[1]) + 127397)
+    def get_icon(self, code):
+        if code == 0:
+            return "sun.png"
+        elif code in [1, 2, 3, 45, 48]:
+            return "cloud.png"
+        elif code in [51, 53, 55, 61, 63, 65]:
+            return "rain.png"
+        elif code in [71, 73, 75]:
+            return "snow.png"
+        elif code in [95, 96, 99]:
+            return "storm.png"
+        else:
+            return "cloud.png"
 
 
 if __name__ == "__main__":
-    OndeEstouExtension().run()
+    UWeather().run()
