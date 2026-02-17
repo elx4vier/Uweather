@@ -2,6 +2,7 @@ import logging
 import requests
 import time
 import os
+from collections import Counter
 
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -91,7 +92,7 @@ class WeatherListener(EventListener):
                 ExtensionResultItem(
                     icon=extension.icon("sun.png"),
                     name=texto,
-                    description="",  # sem texto adicional
+                    description="",  # sem texto extra
                     on_enter=None
                 )
             ])
@@ -167,57 +168,7 @@ class WeatherListener(EventListener):
         raise Exception("Falha na localização")
 
     # =============================
-    # OPEN-METEO (principal)
-    # =============================
-
-    def fetch_open_meteo(self, extension, lat, lon, city):
-        url = (
-            f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
-            "&current_weather=true"
-            "&daily=weathercode,temperature_2m_max,temperature_2m_min"
-            "&hourly=temperature_2m,weathercode"
-            "&timezone=auto"
-        )
-        r = extension.session.get(url, timeout=5)
-        if r.status_code != 200:
-            raise Exception("Open-Meteo falhou")
-
-        data = r.json()
-
-        # Forecast próximo 3 dias
-        forecast = []
-        for i in range(1, 4):
-            forecast.append({
-                "date": data["daily"]["time"][i],
-                "max": data["daily"]["temperature_2m_max"][i],
-                "min": data["daily"]["temperature_2m_min"][i],
-                "code": data["daily"]["weathercode"][i]
-            })
-
-        # Próximas horas (próximas 3 da hora atual)
-        next_hours = []
-        hourly_temp = data.get("hourly", {}).get("temperature_2m", [])
-        hourly_code = data.get("hourly", {}).get("weathercode", [])
-        for i in range(min(3, len(hourly_temp))):
-            next_hours.append({
-                "time": f"{i*3+12}:00",
-                "temp": hourly_temp[i],
-                "code": hourly_code[i]
-            })
-
-        return {
-            "city": city or "Localização atual",
-            "current": {
-                "temp": data["current_weather"]["temperature"],
-                "code": data["current_weather"]["weathercode"],
-                "sensacao": data["current_weather"]["temperature"]
-            },
-            "forecast": forecast,
-            "hours": next_hours
-        }
-
-    # =============================
-    # OPENWEATHERMAP (fallback)
+    # OPENWEATHERMAP (principal e fallback)
     # =============================
 
     def fetch_openweather(self, extension, lat, lon):
@@ -240,52 +191,49 @@ class WeatherListener(EventListener):
             if date not in used_dates:
                 forecast.append({
                     "date": date,
-                    "max": item["main"]["temp_max"],
-                    "min": item["main"]["temp_min"],
+                    "max": int(item["main"]["temp_max"]),
+                    "min": int(item["main"]["temp_min"]),
                     "code": 1
                 })
                 used_dates.add(date)
             if len(forecast) == 3:
                 break
 
+        # Próximas horas: usar condições e probabilidade de chuva
+        next_hours = data["list"][:6]  # próximas 6 horas
+        conditions = [1 for i in next_hours]  # simplificado: todos code=1
+        pop = [int(i.get("pop", 0)*100) for i in next_hours]  # probabilidade de chuva %
+
+        most_common_code = Counter(conditions).most_common(1)[0][0]
+        rain_chance = max(pop) if pop else 0
+
         return {
-            "city": data["city"]["name"],
+            "city": f"{data['city']['name']}, {data['city']['country']}",
             "current": {
-                "temp": current["main"]["temp"],
+                "temp": int(current["main"]["temp"]),
                 "code": 1,
-                "sensacao": current["main"]["feels_like"] if "feels_like" in current["main"] else current["main"]["temp"]
+                "text": "Céu limpo",
             },
-            "forecast": forecast,
-            "hours": [
-                {"time": item["dt_txt"].split(" ")[1][:5],
-                 "temp": item["main"]["temp"],
-                 "code": 1} for item in data["list"][:3]
-            ]
+            "forecast": forecast[1:],  # Amanhã e Depois
+            "next_condition": most_common_code,
+            "rain_chance": rain_chance
         }
 
     # =============================
-    # FORMATAÇÃO CLEAN VERTICAL
+    # FORMATAR BLOCO CLEAN
     # =============================
 
     def format_block(self, data):
         cur = data["current"]
-        hours = data.get("hours", [])
-        fcs = data["forecast"]
-
-        block = f"{data['city']} — {cur['temp']}º {self.weather_emoji(cur['code'])}\n"
-        block += f"{self.weather_text(cur['code'])} | Sensação: {cur['sensacao']}º\n\n"
-
-        block += "Próximas horas:\n"
-        for h in hours:
-            block += f"{h['time']} - {h['temp']}º {self.weather_emoji(h['code'])}\n"
-        block += "\n"
-
-        dias = ["Amanhã", "Depois"]
-        for i, day in enumerate(fcs):
-            if i >= len(dias):
-                break
-            block += f"{dias[i]}: {day['max']}º / {day['min']}º {self.weather_emoji(day['code'])}\n"
-
+        emoji = self.weather_emoji(cur["code"])
+        block = f"{data['city']}\n"
+        block += f"{cur['temp']}º, {cur['text']}\n\n"
+        block += f"Próximas horas: {emoji}\n"
+        block += f"Possibilidade de chuva: {data['rain_chance']}%\n\n"
+        for i, day in enumerate(data["forecast"]):
+            day_emoji = self.weather_emoji(day["code"])
+            dias = ["Amanhã", "Depois"]
+            block += f"{dias[i]}: {day['max']}º / {day['min']}º {day_emoji}\n"
         block += "\nFonte: OpenWeatherMap"
         return block
 
