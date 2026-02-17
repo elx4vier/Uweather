@@ -5,7 +5,7 @@
   "display_name": "UWeather - Clima Atual + 3 Dias",
   "description": "Clima atual e previsão automática com cache inteligente.",
   "developer_name": "Xavier",
-  "icon": "images/sun.png",
+  "icon": "images/icon.png",
   "options": {
     "query_debounce": 0.1
   },
