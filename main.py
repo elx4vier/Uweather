@@ -84,13 +84,30 @@ class WeatherListener(EventListener):
             city_query = event.get_argument()
             cache_key = (city_query.lower().strip() if city_query else "auto")
 
-            # verifica cache
+            # =====================
+            # STATUS LOADING
+            # =====================
+            if not city_query and "auto" not in extension.cache:
+                return RenderResultListAction([
+                    ExtensionResultItem(
+                        icon=extension.icon("icon.png"),
+                        name="Carregando clima...",
+                        description="Aguarde alguns instantes",
+                        on_enter=None
+                    )
+                ])
+
+            # =====================
+            # CACHE
+            # =====================
             if cache_key in extension.cache:
                 data, ts = extension.cache[cache_key]
                 if time.time() - ts < CACHE_TTL:
                     return self.render_weather(data, extension)
 
-            # busca dados
+            # =====================
+            # BUSCA DADOS
+            # =====================
             if city_query:
                 data = self.fetch_weather(city=city_query, api_key=api_key, session=extension.session)
             else:
