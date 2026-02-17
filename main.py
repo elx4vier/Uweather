@@ -107,12 +107,22 @@ class WeatherListener(EventListener):
             return self.render_weather(data, extension)
 
         except Exception as e:
-            logger.error(str(e))
+            msg = str(e)
+            # tratamento personalizado para cidade não encontrada
+            if "Cidade não encontrada" in msg:
+                name = "Cidade não encontrada"
+                description = "Por favor, digite uma cidade válida"
+                icon_file = "icon.png"
+            else:
+                name = "Erro ao obter clima"
+                description = msg
+                icon_file = "error.png"
+
             return RenderResultListAction([
                 ExtensionResultItem(
-                    icon=extension.icon("error.png"),
-                    name="Erro ao obter clima",
-                    description=str(e),
+                    icon=extension.icon(icon_file),
+                    name=name,
+                    description=description,
                     on_enter=None
                 )
             ])
