@@ -60,32 +60,24 @@ class WeatherListener(EventListener):
                 raise Exception("Configure sua API Key do OpenWeatherMap.")
 
             city_query = event.get_argument()
+            results = []
+
             if city_query:
-                # busca clima da cidade digitada
+                # Busca cidade digitada
                 data = self.fetch_city(city_query, api_key, extension.session)
+                results.append(self.build_item(data, extension))
             else:
-                # busca clima da localização atual
+                # localização atual
                 geo = self.fetch_location(extension)
                 data = self.fetch_coords(geo["latitude"], geo["longitude"], geo.get("city"), api_key, extension.session)
+                results.append(self.build_item(data, extension))
 
-            # cache
-            cache_key = city_query.lower().strip() if city_query else "auto"
-            extension.cache[cache_key] = (data, time.time())
+                # duas cidades próximas
+                nearby_cities = self.fetch_nearby(geo["latitude"], geo["longitude"], api_key, extension.session)
+                for city in nearby_cities[:2]:
+                    results.append(self.build_item(city, extension))
 
-            # monta bloco
-            name = f"{data['city']}\n{data['current']['temp']}º — {data['current']['text']}"
-            forecast = data["forecast"]
-            description = f"Amanhã: {forecast[0]['min']}º / {forecast[0]['max']}º {self.weather_emoji(forecast[0]['code'])} | " \
-                          f"Depois: {forecast[1]['min']}º / {forecast[1]['max']}º {self.weather_emoji(forecast[1]['code'])}"
-
-            return RenderResultListAction([
-                ExtensionResultItem(
-                    icon=extension.icon("sun.png"),
-                    name=name,
-                    description=description,
-                    on_enter=None
-                )
-            ])
+            return RenderResultListAction(results)
 
         except Exception as e:
             logger.error(str(e))
@@ -97,6 +89,21 @@ class WeatherListener(EventListener):
                     on_enter=None
                 )
             ])
+
+    # =====================
+    # Construir bloco
+    # =====================
+    def build_item(self, data, extension):
+        name = f"{data['city']}\n{data['current']['temp']}º — {data['current']['text']}"
+        forecast = data["forecast"]
+        description = f"Amanhã: {forecast[0]['min']}º / {forecast[0]['max']}º {self.weather_emoji(forecast[0]['code'])} | " \
+                      f"Depois: {forecast[1]['min']}º / {forecast[1]['max']}º {self.weather_emoji(forecast[1]['code'])}"
+        return ExtensionResultItem(
+            icon=extension.icon("sun.png"),
+            name=name,
+            description=description,
+            on_enter=None
+        )
 
     # =====================
     # FETCH CIDADE / COORDS
@@ -117,46 +124,53 @@ class WeatherListener(EventListener):
         data["city"] = f"{city}, {data['city'].split(',')[1]}"  # mantém sigla país
         return data
 
+    def fetch_nearby(self, lat, lon, api_key, session):
+        """Busca cidades próximas via OpenWeatherMap find endpoint."""
+        url = f"https://api.openweathermap.org/data/2.5/find?lat={lat}&lon={lon}&cnt=5&appid={api_key}&units=metric&lang=pt_br"
+        r = session.get(url, timeout=5)
+        if r.status_code != 200:
+            return []
+        cities = []
+        for item in r.json().get("list", []):
+            cities.append(self.parse_owm({"city":{"name":item["name"],"country":item["sys"]["country"]},"list":[item,item,item]}))
+        return cities
+
     # =====================
     # PARSE OPENWEATHER
     # =====================
     def parse_owm(self, data):
-        current = data["list"][0]
-        forecast = []
-        used_dates = set()
+        """Calcula max/min verdadeiro do dia."""
+        # Agrupa por dia
+        daily = {}
         for item in data["list"]:
             date = item["dt_txt"].split(" ")[0]
-            if date not in used_dates:
-                forecast.append({
-                    "max": int(item["main"]["temp_max"]),
-                    "min": int(item["main"]["temp_min"]),
-                    "code": 1  # placeholder para emoji
-                })
-                used_dates.add(date)
-            if len(forecast) == 3:
-                break
+            if date not in daily:
+                daily[date] = {"min": item["main"]["temp_min"], "max": item["main"]["temp_max"], "code":1}
+            else:
+                daily[date]["min"] = min(daily[date]["min"], item["main"]["temp_min"])
+                daily[date]["max"] = max(daily[date]["max"], item["main"]["temp_max"])
+
+        days = list(daily.values())
+        forecast = [{"min":int(d["min"]), "max":int(d["max"]), "code":d["code"]} for d in days[1:3]]  # Amanhã e Depois
+
+        current_temp = int(data["list"][0]["main"]["temp"])
+        current_text = self.weather_text(0)
         return {
             "city": f"{data['city']['name']}, {data['city']['country']}",
-            "current": {
-                "temp": int(current["main"]["temp"]),
-                "text": "Céu limpo",
-                "code": 0
-            },
-            "forecast": forecast[1:]  # Amanhã + Depois
+            "current": {"temp": current_temp, "text": current_text, "code": 0},
+            "forecast": forecast
         }
 
     # =====================
     # LOCALIZAÇÃO
     # =====================
     def fetch_location(self, extension):
-        # ipapi
         try:
             r = extension.session.get("https://ipapi.co/json/", timeout=5)
             geo = r.json()
             if "latitude" in geo and "longitude" in geo:
                 return geo
         except: pass
-        # ip-api fallback
         try:
             r = extension.session.get("http://ip-api.com/json/", timeout=5)
             geo = r.json()
