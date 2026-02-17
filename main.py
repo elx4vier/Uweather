@@ -2,6 +2,7 @@ import logging
 import requests
 import time
 import os
+import threading
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -30,9 +31,26 @@ class UWeather(Extension):
         self.cache = {}  # {"key": (data, timestamp)}
         self.base_path = os.path.dirname(os.path.abspath(__file__))
 
+        # inicia pré-busca assíncrona
+        threading.Thread(target=self.preload_weather, daemon=True).start()
+
     def icon(self, filename):
         path = os.path.join(self.base_path, "images", filename)
         return path if os.path.exists(path) else ""
+
+    def preload_weather(self):
+        """Pré-busca o clima da localização atual e salva no cache"""
+        try:
+            api_key = self.preferences.get("api_key")
+            if not api_key:
+                return
+            geo = WeatherListener().fetch_location(self)
+            data = WeatherListener().fetch_weather(lat=geo["latitude"], lon=geo["longitude"],
+                                                   city_name=geo.get("city"), api_key=api_key, session=self.session)
+            self.cache["auto"] = (data, time.time())
+        except Exception as e:
+            logger.error(f"Pré-busca falhou: {e}")
+
 
 class WeatherListener(EventListener):
 
@@ -81,7 +99,8 @@ class WeatherListener(EventListener):
                 data = self.fetch_weather(city=city_query, api_key=api_key, session=extension.session)
             else:
                 geo = self.fetch_location(extension)
-                data = self.fetch_weather(lat=geo["latitude"], lon=geo["longitude"], city_name=geo.get("city"), api_key=api_key, session=extension.session)
+                data = self.fetch_weather(lat=geo["latitude"], lon=geo["longitude"],
+                                          city_name=geo.get("city"), api_key=api_key, session=extension.session)
 
             # Atualiza cache
             extension.cache[cache_key] = (data, time.time())
@@ -115,7 +134,6 @@ class WeatherListener(EventListener):
         data = r.json()
         parsed = self.parse_owm(data)
 
-        # Ajusta cidade caso use coords
         if city_name and not city:
             parsed["city"] = f"{city_name}, {parsed['city'].split(',')[1]}"
 
@@ -171,7 +189,7 @@ class WeatherListener(EventListener):
         )
         return RenderResultListAction([
             ExtensionResultItem(
-                icon=extension.icon("icon.png"),  # ícone atualizado
+                icon=extension.icon("icon.png"),  # ícone principal
                 name=f"{data['city']}\n{data['current']['temp']}º — {data['current']['text']}",
                 description=description,
                 on_enter=None
