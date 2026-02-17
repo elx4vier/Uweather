@@ -1,10 +1,6 @@
 import logging
 import requests
-import time
-from collections import Counter
 import os
-from datetime import datetime
-
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -43,6 +39,7 @@ class UWeather(Extension):
 class WeatherListener(EventListener):
 
     def weather_emoji(self, code):
+        """Retorna emoji do clima baseado no código."""
         if code == 0:
             return "☀️"
         elif code in [1, 2, 3, 45, 48]:
@@ -57,6 +54,7 @@ class WeatherListener(EventListener):
             return "🌤️"
 
     def weather_text(self, code):
+        """Retorna texto do clima baseado no código."""
         if code == 0:
             return "Céu limpo"
         elif code in [1, 2, 3, 45, 48]:
@@ -72,30 +70,41 @@ class WeatherListener(EventListener):
 
     def on_event(self, event, extension):
         try:
-            city_query = event.get_argument()
-            cache_key = city_query.lower().strip() if city_query else "auto"
+            api_key = extension.preferences.get("api_key")
+            if not api_key:
+                raise Exception("Configure sua API Key do OpenWeatherMap nas preferências.")
+
+            city = event.get_argument() or "Paris"  # Default Paris se não passar cidade
+            cache_key = city.lower().strip()
+            import time
             now = time.time()
 
+            # Cache inteligente
             if cache_key in extension.cache:
                 cached_data, cache_time = extension.cache[cache_key]
                 if now - cache_time < CACHE_TTL:
                     data = cached_data
                 else:
-                    data = self.fetch_weather(extension, city_query)
+                    data = self.fetch_weather(city, api_key, extension.session)
                     extension.cache[cache_key] = (data, now)
             else:
-                data = self.fetch_weather(extension, city_query)
+                data = self.fetch_weather(city, api_key, extension.session)
                 extension.cache[cache_key] = (data, now)
 
-            texto = self.format_block(data)
+            # Monta bloco clean
+            name = f"{data['city']}\n{data['current']['temp']}º, {data['current']['text']}"
+            description = f"Amanhã: {data['forecast'][0]['max']}º / {data['forecast'][0]['min']}º {self.weather_emoji(data['forecast'][0]['code'])} | " \
+                          f"Depois: {data['forecast'][1]['max']}º / {data['forecast'][1]['min']}º {self.weather_emoji(data['forecast'][1]['code'])}"
+
             return RenderResultListAction([
                 ExtensionResultItem(
                     icon=extension.icon("sun.png"),
-                    name=texto,
-                    description="",
+                    name=name,
+                    description=description,  # aparece em fonte menor
                     on_enter=None
                 )
             ])
+
         except Exception as e:
             logger.error(str(e))
             return RenderResultListAction([
@@ -107,121 +116,39 @@ class WeatherListener(EventListener):
                 )
             ])
 
-    # =============================
-    # BUSCA PRINCIPAL
-    # =============================
-    def fetch_weather(self, extension, city_query=None):
-        if city_query:
-            return self.fetch_by_city(extension, city_query)
-        else:
-            geo = self.fetch_location(extension)
-            return self.fetch_by_coords(extension, geo["latitude"], geo["longitude"], geo.get("city"))
-
-    # =============================
-    # LOCALIZAÇÃO
-    # =============================
-    def fetch_location(self, extension):
-        try:
-            r = extension.session.get("https://ipapi.co/json/", timeout=5)
-            geo = r.json()
-            if "latitude" in geo and "longitude" in geo:
-                return geo
-        except Exception:
-            pass
-        try:
-            r = extension.session.get("http://ip-api.com/json/", timeout=5)
-            geo = r.json()
-            return {"latitude": geo["lat"], "longitude": geo["lon"], "city": geo.get("city", "Desconhecida")}
-        except Exception:
-            pass
-        raise Exception("Falha na localização")
-
-    # =============================
-    # OPENWEATHERMAP
-    # =============================
-    def fetch_by_city(self, extension, city):
-        api_key = extension.preferences.get("api_key")
-        if not api_key:
-            raise Exception("Configure sua API Key do OpenWeatherMap nas preferências.")
+    def fetch_weather(self, city, api_key, session):
+        """Busca clima pelo OpenWeatherMap."""
         url = f"https://api.openweathermap.org/data/2.5/forecast?q={city}&appid={api_key}&units=metric&lang=pt_br"
-        r = extension.session.get(url, timeout=5)
+        r = session.get(url, timeout=5)
         if r.status_code != 200:
-            raise Exception("Cidade não encontrada.")
-        return self.parse_openweather(r.json())
+            raise Exception("Cidade não encontrada ou erro na API.")
 
-    def fetch_by_coords(self, extension, lat, lon, city):
-        api_key = extension.preferences.get("api_key")
-        if not api_key:
-            raise Exception("Configure sua API Key do OpenWeatherMap nas preferências.")
-        url = f"https://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={api_key}&units=metric&lang=pt_br"
-        r = extension.session.get(url, timeout=5)
-        if r.status_code != 200:
-            raise Exception("Falha ao buscar clima.")
-        return self.parse_openweather(r.json())
-
-    # =============================
-    # PARSE OPENWEATHER
-    # =============================
-    def parse_openweather(self, data):
+        data = r.json()
         current = data["list"][0]
+
         forecast = []
         used_dates = set()
-        hours_next = []
-
-        # Próximas 5 horas
-        count_hours = 0
-        for item in data["list"]:
-            dt = datetime.strptime(item["dt_txt"], "%Y-%m-%d %H:%M:%S")
-            hours_next.append({
-                "time": dt.strftime("%Hh"),
-                "temp": int(item["main"]["temp"]),
-                "code": 1,
-                "text": self.weather_text(0)
-            })
-            count_hours += 1
-            if count_hours == 5:
-                break
-
-        # Previsão dois dias
         for item in data["list"]:
             date = item["dt_txt"].split(" ")[0]
             if date not in used_dates:
                 forecast.append({
-                    "date": date,
                     "max": int(item["main"]["temp_max"]),
                     "min": int(item["main"]["temp_min"]),
-                    "code": 1
+                    "code": 1  # Pode melhorar para usar código real
                 })
                 used_dates.add(date)
-            if len(forecast) == 3:
+            if len(forecast) == 3:  # Amanhã + Depois
                 break
 
         return {
-            "city": f"{data['city']['name']}, {data['city']['country']}",
+            "city": f"{data['city']['name']} — {data['city']['country']}",
             "current": {
                 "temp": int(current["main"]["temp"]),
-                "text": "Céu limpo",
-                "code": 1
+                "text": "Céu limpo",  # Pode melhorar para pegar condição real
+                "code": 0
             },
-            "hours_next": hours_next,
-            "forecast": forecast[1:]  # Amanhã e Depois
+            "forecast": forecast[1:]  # Pega Amanhã e Depois
         }
-
-    # =============================
-    # FORMATAR BLOCO CLEAN
-    # =============================
-    def format_block(self, data):
-        block = f"{data['current']['temp']}º, {data['current']['text']}\n\n"
-        block += "Próximas horas:\n"
-        for h in data["hours_next"]:
-            block += f"{h['text']} {self.weather_emoji(h['code'])} - {h['time']}\n"
-        block += "\n"
-        for i, day in enumerate(data["forecast"]):
-            day_emoji = self.weather_emoji(day["code"])
-            dias = ["Amanhã", "Depois"]
-            block += f"{dias[i]}: {day['max']}º / {day['min']}º {day_emoji}\n"
-        block += f"\n{data['city']}"
-        return block
 
 
 if __name__ == "__main__":
