@@ -46,7 +46,6 @@ class WeatherListener(EventListener):
     }
 
     def weather_emoji(self, code):
-        # converte código OpenWeather em categoria
         if code < 300: return self.EMOJI_MAP["thunderstorm"]
         elif code < 600: return self.EMOJI_MAP["rain"]
         elif code < 700: return self.EMOJI_MAP["snow"]
@@ -172,7 +171,7 @@ class WeatherListener(EventListener):
         )
         return RenderResultListAction([
             ExtensionResultItem(
-                icon=extension.icon("sun.png"),
+                icon=extension.icon("icon.png"),  # ícone atualizado
                 name=f"{data['city']}\n{data['current']['temp']}º — {data['current']['text']}",
                 description=description,
                 on_enter=None
