@@ -279,6 +279,5 @@ def render(self, data, extension, interface_mode):
         )
     ])
 
-
 if __name__=="__main__":
     UWeather().run()
