@@ -17,7 +17,7 @@ CACHE = {}
 CACHE_TTL = 600
 DEBOUNCE_DELAY = 0.4
 LAST_QUERY_TIME = 0
-LAST_ACTION = None  # Armazena a última ação para evitar tela vazia durante debounce
+LAST_ACTION = None  # Armazena a última ação para referência (não usado mais no debounce)
 
 # =========================
 # ⚡ CACHE
@@ -126,7 +126,7 @@ def get_weather(lat, lon, unit):
         return None
     result = {
         "current_temp": current.get("temperature"),
-        "current_desc": WMO.get(current.get("weathercode")),  # sem fallback "Weather"
+        "current_desc": WMO.get(current.get("weathercode")),
         "forecast": []
     }
     try:
@@ -152,20 +152,16 @@ class WeatherHandler(EventListener):
         global LAST_QUERY_TIME, LAST_ACTION
         now = time.time()
 
-        # ✅ DEBOUNCE: se for muito rápido, retorna a última ação (evita tela vazia)
+        # ✅ DEBOUNCE: sempre mostra "Buscando..." enquanto digita
         if now - LAST_QUERY_TIME < DEBOUNCE_DELAY:
-            if LAST_ACTION is not None:
-                return LAST_ACTION
-            else:
-                # Primeira execução ainda sem resultado
-                return RenderResultListAction([
-                    SmallResultItem(
-                        icon='images/icon.png',
-                        name="Aguarde...",
-                        description="Carregando clima",
-                        on_enter=DoNothingAction()
-                    )
-                ])
+            return RenderResultListAction([
+                SmallResultItem(
+                    icon='images/icon.png',
+                    name="Buscando...",
+                    description="Aguarde enquanto processamos sua consulta",
+                    on_enter=DoNothingAction()
+                )
+            ])
 
         LAST_QUERY_TIME = now
         unit = extension.preferences.get("unit", "metric")
