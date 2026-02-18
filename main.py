@@ -15,7 +15,6 @@ from ulauncher.api.shared.action.RenderResultListAction import RenderResultListA
 # =========================
 CACHE = {}
 CACHE_TTL = 600           # 10 minutos
-DEBOUNCE_DELAY = 0.35     # um pouco mais rápido
 
 # =========================
 # ⚡ CACHE
@@ -101,13 +100,27 @@ WMO = {
     45: "Nevoeiro",
     48: "Nevoeiro denso",
     51: "Garoa leve",
+    53: "Garoa moderada",
+    55: "Garoa intensa",
+    56: "Garoa congelante leve",
+    57: "Garoa congelante intensa",
     61: "Chuva leve",
     63: "Chuva moderada",
     65: "Chuva forte",
+    66: "Chuva congelante leve",
+    67: "Chuva congelante intensa",
     71: "Neve leve",
     73: "Neve moderada",
+    75: "Neve forte",
+    77: "Grãos de neve",
+    80: "Chuva leve em pancadas",
+    81: "Chuva moderada em pancadas",
+    82: "Chuva forte em pancadas",
+    85: "Neve leve em pancadas",
+    86: "Neve forte em pancadas",
     95: "Tempestade",
-    99: "Tempestade com granizo"
+    96: "Tempestade com granizo leve",
+    99: "Tempestade com granizo forte"
 }
 
 def get_weather(lat, lon, unit):
@@ -145,7 +158,7 @@ def get_weather(lat, lon, unit):
             max_t = daily['temperature_2m_max'][i]
             min_t = daily['temperature_2m_min'][i]
             result["forecast"].append(f"{max_t:.0f} / {min_t:.0f}")
-    except:
+    except IndexError:
         pass
 
     set_cache(cache_key, result)
@@ -185,19 +198,19 @@ class WeatherHandler(EventListener):
                     SmallResultItem(
                         icon='images/icon.png',
                         name="Cidade não encontrada",
-                        description=f"Nenhum resultado para '{query}'",
+                        description=f"Nenhum resultado para '{query}'. Tente outro nome.",
                         on_enter=DoNothingAction()
                     )
                 ])
 
         # ── Buscar clima
         weather = get_weather(lat, lon, unit)
-        if not weather:
+        if not weather or weather["current_temp"] is None:
             return RenderResultListAction([
                 SmallResultItem(
                     icon='images/icon.png',
                     name="Erro ao obter o clima",
-                    description="Tente novamente em alguns segundos",
+                    description="Tente novamente em alguns segundos ou verifique a conexão.",
                     on_enter=DoNothingAction()
                 )
             ])
@@ -210,7 +223,7 @@ class WeatherHandler(EventListener):
         if weather["current_desc"]:
             first_line += f" – {weather['current_desc']}"
 
-        forecast_str = " | ".join(weather["forecast"]) if weather["forecast"] else "—"
+        forecast_str = " | ".join(weather["forecast"]) if weather["forecast"] else "Sem previsão disponível"
         desc = f"{first_line}\nPróximos dias: {forecast_str}"
 
         return RenderResultListAction([
