@@ -225,51 +225,59 @@ class WeatherListener(EventListener):
     # ==============================
     # RENDER
     # ==============================
-    def render(self, data, extension, interface_mode):
-        city_name = data.get("city_name") or "Desconhecida"
-        country = data.get("country") or "BR"
-        flag = country_flag(country)
-        temp = data["current"]["temp"]
-        desc = data["current"]["desc"]
-        forecast = data.get("forecast", [])
+def render(self, data, extension, interface_mode):
+    city_name = data.get("city_name") or "Desconhecida"
+    country = data.get("country") or "BR"
+    flag = country_flag(country)
+    temp = data["current"]["temp"]
+    desc = data["current"]["desc"]
+    forecast = data.get("forecast", [])
 
-        # Completo: 3 linhas, terceira linha menor
-        if interface_mode=="complete":
-            line1 = f"{city_name}, {country} {flag}"
-            line2 = f"{temp}º, {desc}"
-            line3 = ""
-            if forecast:
-                tomorrow = forecast[0]
-                after = forecast[1] if len(forecast)>1 else None
-                parts = []
-                if tomorrow:
-                    parts.append(f"Amanhã: {tomorrow['min']}º / {tomorrow['max']}º")
-                if after:
-                    parts.append(f"Depois: {after['min']}º / {after['max']}º")
-                line3 = " | ".join(parts)
-            name = f"{line1}\n{line2}\n{line3}"
-            description = ""
+    # -----------------------------
+    # Completo: 3 linhas, 3ª linha em fonte menor
+    # -----------------------------
+    if interface_mode=="complete":
+        line1 = f"{city_name}, {country} {flag}"
+        line2 = f"{temp}º, {desc}"
+        line3 = ""
+        if forecast:
+            tomorrow = forecast[0]
+            after = forecast[1] if len(forecast)>1 else None
+            parts = []
+            if tomorrow:
+                parts.append(f"Amanhã: {tomorrow['min']}º / {tomorrow['max']}º")
+            if after:
+                parts.append(f"Depois: {after['min']}º / {after['max']}º")
+            line3 = " | ".join(parts)
+        # terceira linha em description → fonte menor
+        name = f"{line1}\n{line2}"
+        description = line3
 
-        # Essencial: 2 linhas, sem bloco, sem emoji
-        elif interface_mode=="essential":
-            line1 = f"{temp}º {desc}"
-            line2 = f"{city_name}, {country} {flag}"
-            name = line1
-            description = line2
+    # -----------------------------
+    # Essencial: duas linhas, vírgula após temperatura
+    # -----------------------------
+    elif interface_mode=="essential":
+        line1 = f"{temp}º, {desc}"
+        line2 = f"{city_name}, {country} {flag}"
+        name = line1
+        description = line2
 
-        # Mínimo: 1 linha, fonte menor
-        elif interface_mode=="minimal":
-            name = f"{temp}º - {city_name} {flag}"
-            description = ""
+    # -----------------------------
+    # Mínimo: linha pequena, fonte simulada menor
+    # -----------------------------
+    elif interface_mode=="minimal":
+        # colocar texto principal em description para reduzir altura
+        name = f"{temp}º - {city_name} {flag}"
+        description = ""  # vazio, ou poderia colocar mesmo texto aqui para compactar ainda mais
 
-        return RenderResultListAction([
-            ExtensionResultItem(
-                icon=extension.icon("icon.png"),
-                name=name,
-                description=description,
-                on_enter=None
-            )
-        ])
+    return RenderResultListAction([
+        ExtensionResultItem(
+            icon=extension.icon("icon.png"),
+            name=name,
+            description=description,
+            on_enter=None
+        )
+    ])
 
 
 if __name__=="__main__":
