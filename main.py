@@ -13,54 +13,52 @@ from ulauncher.api.shared.action.RenderResultListAction import RenderResultListA
 
 
 # =========================
-# ⚡ CACHE SYSTEM
+# ⚡ CACHE
 # =========================
 
 CACHE = {}
-CACHE_TTL = 600  # 10 minutos
+CACHE_TTL = 600
 
 
 def get_cache(key):
-    if key in CACHE:
-        if time.time() - CACHE[key]["time"] < CACHE_TTL:
-            return CACHE[key]["data"]
+    if key in CACHE and time.time() - CACHE[key]["time"] < CACHE_TTL:
+        return CACHE[key]["data"]
     return None
 
 
 def set_cache(key, data):
-    CACHE[key] = {
-        "time": time.time(),
-        "data": data
-    }
+    CACHE[key] = {"time": time.time(), "data": data}
 
 
 # =========================
-# 🌍 INTERFACE TEXTS
+# 🌤 WMO DESCRIPTIONS
 # =========================
 
-TEXTS = {
-    "en": {"current": "Current weather", "forecast": "Forecast"},
-    "pt": {"current": "Clima atual", "forecast": "Previsão"},
-    "es": {"current": "Clima actual", "forecast": "Pronóstico"},
-    "fr": {"current": "Météo actuelle", "forecast": "Prévision"},
-    "ru": {"current": "Текущая погода", "forecast": "Прогноз"}
+WMO = {
+    0: "Clear sky",
+    1: "Mainly clear",
+    2: "Partly cloudy",
+    3: "Overcast",
+    45: "Fog",
+    48: "Depositing rime fog",
+    51: "Light drizzle",
+    53: "Drizzle",
+    55: "Heavy drizzle",
+    61: "Light rain",
+    63: "Rain",
+    65: "Heavy rain",
+    71: "Light snow",
+    73: "Snow",
+    75: "Heavy snow",
+    80: "Rain showers",
+    81: "Rain showers",
+    82: "Heavy rain showers",
+    95: "Thunderstorm"
 }
 
 
 # =========================
-# 🌤 WMO TRANSLATIONS
-# =========================
-
-WMO_TRANSLATIONS = {
-    0: {"en": "Clear sky", "pt": "Céu limpo", "es": "Cielo despejado", "fr": "Ciel dégagé", "ru": "Ясно"},
-    1: {"en": "Mainly clear", "pt": "Principalmente limpo", "es": "Mayormente despejado", "fr": "Principalement clair", "ru": "Преимущественно ясно"},
-    2: {"en": "Partly cloudy", "pt": "Parcialmente nublado", "es": "Parcialmente nublado", "fr": "Partiellement nuageux", "ru": "Переменная облачность"},
-    3: {"en": "Overcast", "pt": "Encoberto", "es": "Cubierto", "fr": "Couvert", "ru": "Пасмурно"}
-}
-
-
-# =========================
-# 🌐 SAFE REQUEST
+# 🌐 REQUEST
 # =========================
 
 def get_json(url):
@@ -73,23 +71,25 @@ def get_json(url):
 
 
 # =========================
-# 📍 LOCATION
+# 📍 GEOLOCATION
 # =========================
-
-def get_ip_location():
-    data = get_json("http://ip-api.com/json/")
-    if data and data.get("status") == "success":
-        return data["lat"], data["lon"], data["city"]
-    return None, None, None
-
 
 def geocode_city(city):
     url = f"https://geocoding-api.open-meteo.com/v1/search?name={urllib.parse.quote(city)}&count=1"
     data = get_json(url)
+
     if data and data.get("results"):
         r = data["results"][0]
-        return r["latitude"], r["longitude"], r["name"]
-    return None, None, None
+        return r["latitude"], r["longitude"], r["name"], r.get("country_code", "")
+
+    return None, None, None, None
+
+
+def get_ip_location():
+    data = get_json("http://ip-api.com/json/")
+    if data and data.get("status") == "success":
+        return data["lat"], data["lon"], data["city"], data["countryCode"]
+    return None, None, None, None
 
 
 # =========================
@@ -97,9 +97,6 @@ def geocode_city(city):
 # =========================
 
 def get_openweather(lat, lon, unit, api_key, lang):
-
-    if not api_key:
-        return "missing_key"
 
     units = "metric" if unit == "metric" else "imperial"
 
@@ -123,8 +120,7 @@ def get_openweather(lat, lon, unit, api_key, lang):
 
     for f in forecasts[:3]:
         result["forecast"].append({
-            "temp": f["main"]["temp"],
-            "desc": f["weather"][0]["description"]
+            "temp": f["main"]["temp"]
         })
 
     return result
@@ -134,7 +130,7 @@ def get_openweather(lat, lon, unit, api_key, lang):
 # 🌤 OPEN-METEO
 # =========================
 
-def get_open_meteo(lat, lon, unit, lang):
+def get_open_meteo(lat, lon, unit):
 
     temp_unit = "celsius" if unit == "metric" else "fahrenheit"
 
@@ -154,19 +150,17 @@ def get_open_meteo(lat, lon, unit, lang):
     current = data["current_weather"]
     daily = data["daily"]
 
-    wmo_code = current["weathercode"]
-    description = WMO_TRANSLATIONS.get(wmo_code, {}).get(lang, "Weather")
+    desc = WMO.get(current["weathercode"], "Weather")
 
     result = {
         "current_temp": current["temperature"],
-        "current_desc": description,
+        "current_desc": desc,
         "forecast": []
     }
 
     for i in range(1, 4):
         result["forecast"].append({
-            "temp": f"{daily['temperature_2m_max'][i]} / {daily['temperature_2m_min'][i]}",
-            "desc": ""
+            "temp": f"{daily['temperature_2m_max'][i]} / {daily['temperature_2m_min'][i]}"
         })
 
     return result
@@ -187,50 +181,64 @@ class WeatherHandler(EventListener):
     def on_event(self, event, extension):
 
         prefs = extension.preferences
-
-        provider = prefs.get("provider", "openweather")
+        provider = prefs.get("provider", "open-meteo")
         unit = prefs.get("unit", "metric")
-        location_mode = prefs.get("location_mode", "auto")
-        static_city = prefs.get("static_city", "")
         api_key = prefs.get("api_key", "")
         lang = prefs.get("language", "en")
-        view_mode = int(prefs.get("view_mode", 5))
 
-        T = TEXTS.get(lang, TEXTS["en"])
+        query = event.get_argument()
 
-        if location_mode == "manual" and static_city:
-            lat, lon, city = geocode_city(static_city)
+        # =========================
+        # 📍 DEFINE LOCALIZAÇÃO
+        # =========================
+
+        if query:
+            lat, lon, city, country = geocode_city(query)
+            if not lat:
+                return RenderResultListAction([
+                    SmallResultItem(
+                        icon='images/icon.png',
+                        name="Cidade não encontrada",
+                        description="Digite uma cidade válida para continuar",
+                        on_enter=DoNothingAction()
+                    )
+                ])
         else:
-            lat, lon, city = get_ip_location()
+            lat, lon, city, country = get_ip_location()
+            if not lat:
+                return RenderResultListAction([
+                    SmallResultItem(
+                        icon='images/icon.png',
+                        name="Falha na localização",
+                        description="Não foi possível detectar sua localização",
+                        on_enter=DoNothingAction()
+                    )
+                ])
 
-        if not lat:
-            return RenderResultListAction([
-                SmallResultItem(
-                    icon='images/icon.png',
-                    name="Location failed",
-                    description="Could not detect your location",
-                    on_enter=DoNothingAction()
-                )
-            ])
+        location_name = f"{city}, {country}" if country else city
 
-        cache_key = f"{provider}-{lat}-{lon}-{unit}-{lang}"
+        # =========================
+        # ☁ BUSCAR CLIMA
+        # =========================
+
+        cache_key = f"{provider}-{lat}-{lon}-{unit}"
         weather = get_cache(cache_key)
 
         if not weather:
-            if provider == "openweather":
-                weather = get_openweather(lat, lon, unit, api_key, lang)
 
-                if weather == "missing_key":
+            if provider == "openweather":
+                if not api_key:
                     return RenderResultListAction([
                         SmallResultItem(
                             icon='images/icon.png',
                             name="Missing OpenWeather API key",
-                            description="Add your API key in extension settings",
+                            description="Add your API key in settings",
                             on_enter=DoNothingAction()
                         )
                     ])
+                weather = get_openweather(lat, lon, unit, api_key, lang)
             else:
-                weather = get_open_meteo(lat, lon, unit, lang)
+                weather = get_open_meteo(lat, lon, unit)
 
             if weather:
                 set_cache(cache_key, weather)
@@ -239,35 +247,25 @@ class WeatherHandler(EventListener):
             return RenderResultListAction([
                 SmallResultItem(
                     icon='images/icon.png',
-                    name="Weather error",
-                    description="Could not fetch weather data",
+                    name="Erro ao buscar clima",
+                    description="Tente novamente",
                     on_enter=DoNothingAction()
                 )
             ])
 
         symbol = "°C" if unit == "metric" else "°F"
 
-        if view_mode == 1:
-            desc = f"{weather['current_temp']}{symbol}"
+        forecast = " | ".join(f"{f['temp']}" for f in weather["forecast"])
 
-        elif view_mode == 2:
-            desc = f"{weather['current_temp']}{symbol} - {weather['current_desc']}"
-
-        elif view_mode == 3:
-            desc = f"{T['current']}: {weather['current_temp']}{symbol}"
-
-        elif view_mode == 4:
-            forecast = " | ".join(f"{f['temp']}{symbol}" for f in weather["forecast"])
-            desc = f"{weather['current_temp']}{symbol} → {forecast}"
-
-        else:
-            forecast = " | ".join(f"{f['temp']}{symbol}" for f in weather["forecast"])
-            desc = f"{T['current']}: {weather['current_temp']}{symbol} - {weather['current_desc']}\n{T['forecast']}: {forecast}"
+        desc = (
+            f"{weather['current_temp']}{symbol} - {weather['current_desc']}\n"
+            f"Próximos dias: {forecast}"
+        )
 
         return RenderResultListAction([
             ExtensionResultItem(
                 icon='images/icon.png',
-                name=f"📍 {city}",
+                name=f"📍 {location_name}",
                 description=desc,
                 on_enter=DoNothingAction()
             )
