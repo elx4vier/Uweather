@@ -16,12 +16,82 @@
       "name": "Palavra-chave",
       "default_value": "clima"
     },
+
     {
       "id": "api_key",
       "type": "input",
-      "name": "OpenWeatherMap API Key",
-      "description": "Insira sua API Key do OpenWeatherMap",
+      "name": "OpenWeather API Key",
+      "description": "Necessária apenas se usar OpenWeather",
       "default_value": ""
+    },
+
+    {
+      "id": "provider",
+      "type": "dropdown",
+      "name": "Provedor de Clima",
+      "default_value": "openweather",
+      "options": [
+        { "name": "OpenWeather", "value": "openweather" },
+        { "name": "Open-Meteo", "value": "openmeteo" }
+      ]
+    },
+
+    {
+      "id": "unit",
+      "type": "dropdown",
+      "name": "Unidade de Temperatura",
+      "default_value": "metric",
+      "options": [
+        { "name": "Celsius (°C)", "value": "metric" },
+        { "name": "Fahrenheit (°F)", "value": "imperial" }
+      ]
+    },
+
+    {
+      "id": "location_mode",
+      "type": "dropdown",
+      "name": "Modo de Localização",
+      "default_value": "auto",
+      "options": [
+        { "name": "Automática (IP dinâmico)", "value": "auto" },
+        { "name": "Cidade fixa", "value": "static" }
+      ]
+    },
+
+    {
+      "id": "static_city",
+      "type": "input",
+      "name": "Cidade Fixa",
+      "description": "Usada apenas se modo for 'Cidade fixa'",
+      "default_value": ""
+    },
+
+    {
+      "id": "view_mode",
+      "type": "dropdown",
+      "name": "Modo de Visualização",
+      "default_value": "full",
+      "options": [
+        { "name": "1 - Completo (cidade, temp, descrição, 3 dias)", "value": "full" },
+        { "name": "2 - Compacto (cidade + temp + amanhã)", "value": "compact" },
+        { "name": "3 - Minimal (cidade + temp)", "value": "minimal" },
+        { "name": "4 - Ultra minimal (temp apenas)", "value": "ultra" },
+        { "name": "5 - Linha única (cidade - temp - amanhã)", "value": "singleline" }
+      ]
+    },
+
+    {
+      "id": "language",
+      "type": "dropdown",
+      "name": "Idioma da Extensão",
+      "default_value": "pt",
+      "options": [
+        { "name": "Português", "value": "pt" },
+        { "name": "English", "value": "en" },
+        { "name": "Español", "value": "es" },
+        { "name": "Русский", "value": "ru" },
+        { "name": "Français", "value": "fr" }
+      ]
     }
   ]
 }
