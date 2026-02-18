@@ -77,8 +77,10 @@ class WeatherService:
 
         r = session.get(url, timeout=5)
         data = r.json()
+        if r.status_code == 401:
+            raise Exception("API key inválida")
         if r.status_code != 200 or data.get("cod") != "200":
-            raise Exception("Cidade não encontrada ou API key inválida")
+            raise Exception("Cidade não encontrada")
         return WeatherService.parse_weather(data)
 
     @staticmethod
@@ -144,7 +146,7 @@ class WeatherService:
 
         sorted_dates = sorted(daily.keys())
         forecast = []
-        for date in sorted_dates[1:3]:  # próximos 2 dias
+        for date in sorted_dates[1:3]:
             forecast.append({
                 "max": int(daily[date]["max"]),
                 "min": int(daily[date]["min"]),
@@ -200,7 +202,7 @@ class UWeather(Extension):
 
 
 # ==============================
-# LISTENER
+# LISTENER REFACTOR
 # ==============================
 class WeatherListener(EventListener):
 
@@ -218,47 +220,83 @@ class WeatherListener(EventListener):
             key = None
 
             if not query and location_mode == "auto":
-                geo = WeatherService.fetch_location(extension.session)
-                key = "auto"
+                try:
+                    geo = WeatherService.fetch_location(extension.session)
+                    key = "auto"
+                except Exception:
+                    return RenderResultListAction([
+                        ExtensionResultItem(
+                            icon=extension.icon("error.png"),
+                            name="Não foi possível obter sua localização atual",
+                            on_enter=None
+                        )
+                    ])
             elif not query and location_mode == "manual" and static_location:
                 query = static_location
                 key = query.lower()
             else:
                 key = query.lower()
 
-            # Cache
             if key in extension.cache:
                 data, ts = extension.cache[key]
                 if time.time() - ts < CACHE_TTL:
                     return self.render(data, extension, interface_mode)
 
-            # Fetch
-            if provider == "openweather":
-                if query:
-                    data = WeatherService.fetch_weather_openweather(
-                        extension.session, api_key, city=query, unit=unit)
+            try:
+                if provider == "openweather":
+                    if query:
+                        data = WeatherService.fetch_weather_openweather(
+                            extension.session, api_key, city=query, unit=unit)
+                    else:
+                        data = WeatherService.fetch_weather_openweather(
+                            extension.session, api_key, lat=geo["latitude"], lon=geo["longitude"], unit=unit)
                 else:
-                    data = WeatherService.fetch_weather_openweather(
-                        extension.session, api_key, lat=geo["latitude"], lon=geo["longitude"], unit=unit)
-            else:
-                data = WeatherService.fetch_weather_openmeteo(
-                    extension.session,
-                    city=query,
-                    lat=geo["latitude"] if geo else None,
-                    lon=geo["longitude"] if geo else None,
-                    unit=unit
-                )
+                    data = WeatherService.fetch_weather_openmeteo(
+                        extension.session,
+                        city=query,
+                        lat=geo["latitude"] if geo else None,
+                        lon=geo["longitude"] if geo else None,
+                        unit=unit
+                    )
+            except Exception as e:
+                msg = str(e).lower()
+                if "cidade não encontrada" in msg or "city not found" in msg:
+                    return RenderResultListAction([
+                        ExtensionResultItem(
+                            icon=extension.icon("icon.png"),
+                            name="Cidade não encontrada",
+                            on_enter=None
+                        )
+                    ])
+                elif "api key" in msg or "invalid api key" in msg:
+                    return RenderResultListAction([
+                        ExtensionResultItem(
+                            icon=extension.icon("error.png"),
+                            name="API key inválida",
+                            on_enter=None
+                        )
+                    ])
+                else:
+                    desc = str(e)[:77] + "..." if len(str(e)) > 80 else str(e)
+                    return RenderResultListAction([
+                        ExtensionResultItem(
+                            icon=extension.icon("error.png"),
+                            name=f"Erro ao obter clima: {desc}",
+                            on_enter=None
+                        )
+                    ])
 
             extension.cache[key] = (data, time.time())
             return self.render(data, extension, interface_mode)
 
         except Exception as e:
-            msg = str(e)
-            name = "Erro ao obter clima"
-            desc = msg if len(msg) < 80 else msg[:77] + "..."
-            icon = extension.icon("error.png")
+            desc = str(e)[:77] + "..." if len(str(e)) > 80 else str(e)
             return RenderResultListAction([
-                ExtensionResultItem(icon=icon, name=name, description=desc, on_enter=None)
+                ExtensionResultItem(
+                    icon=extension.icon("error.png"),
+                    name=f"Erro ao obter clima: {desc}",
+                    on_enter=None
+                )
             ])
 
     def render(self, data, extension, interface_mode):
@@ -310,10 +348,7 @@ class WeatherListener(EventListener):
             )
 
         elif interface_mode == "minimal":
-            # Modo super compacto
             minimal_text = f"{temp}º – {city_name} {flag}"
-            # Se quiser ainda menor: minimal_text = f"{temp}º {flag}"
-
             items.append(
                 ExtensionSmallResultItem(
                     icon=extension.icon("icon.png"),
