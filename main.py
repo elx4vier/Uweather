@@ -315,3 +315,4 @@ class WeatherHandler(EventListener):
 
 if __name__ == "__main__":
     UWeatherExtension().run()
+    
