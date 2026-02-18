@@ -20,7 +20,7 @@
       "type": "keyword",
       "name": "Keyword",
       "default_value": "w",
-      "description": "Word to trigger the weather search."
+      "description": "Type this keyword to trigger the weather search."
     },
 
     {
@@ -60,15 +60,15 @@
       "default_value": "auto",
       "options": [
         { "text": "Automatic", "value": "auto" },
-        { "text": "Manual (Static City)", "value": "manual" }
+        { "text": "Manual", "value": "manual" }
       ]
     },
 
     {
-      "id": "static_city",
+      "id": "static_location",
       "type": "input",
-      "name": "Manual City",
-      "description": "Used only if Location Mode is set to Manual. Example: São Luís, BR",
+      "name": "Static Location",
+      "description": "Used only if Location Mode is Manual. Example: São Luís, BR",
       "default_value": ""
     },
 
