@@ -13,12 +13,18 @@ from ulauncher.api.shared.action.RenderResultListAction import RenderResultListA
 
 
 # =========================
-# ⚡ CACHE
+# ⚡ CONFIG
 # =========================
 
 CACHE = {}
-CACHE_TTL = 600  # 10 minutos
+CACHE_TTL = 600
+DEBOUNCE_DELAY = 0.4  # 400ms
+LAST_QUERY_TIME = 0
 
+
+# =========================
+# ⚡ CACHE
+# =========================
 
 def get_cache(key):
     if key in CACHE and time.time() - CACHE[key]["time"] < CACHE_TTL:
@@ -31,34 +37,17 @@ def set_cache(key, data):
 
 
 # =========================
-# 🌤 WMO DESCRIPTIONS
+# 🏳 COUNTRY FLAG
 # =========================
 
-WMO = {
-    0: "Clear sky",
-    1: "Mainly clear",
-    2: "Partly cloudy",
-    3: "Overcast",
-    45: "Fog",
-    48: "Rime fog",
-    51: "Light drizzle",
-    53: "Drizzle",
-    55: "Heavy drizzle",
-    61: "Light rain",
-    63: "Rain",
-    65: "Heavy rain",
-    71: "Light snow",
-    73: "Snow",
-    75: "Heavy snow",
-    80: "Rain showers",
-    81: "Rain showers",
-    82: "Heavy rain showers",
-    95: "Thunderstorm"
-}
+def country_flag(code):
+    if not code:
+        return ""
+    return "".join(chr(127397 + ord(c)) for c in code.upper())
 
 
 # =========================
-# 🌐 SAFE REQUEST (3s timeout)
+# 🌐 REQUEST
 # =========================
 
 def get_json(url):
@@ -71,7 +60,7 @@ def get_json(url):
 
 
 # =========================
-# 📍 GEOLOCATION (COM CACHE)
+# 📍 GEOLOCATION
 # =========================
 
 def geocode_city(city):
@@ -119,44 +108,29 @@ def get_ip_location():
 
 
 # =========================
-# ☁ OPENWEATHER
+# 🌤 WEATHER (OPEN-METEO)
 # =========================
 
-def get_openweather(lat, lon, unit, api_key, lang):
-
-    units = "metric" if unit == "metric" else "imperial"
-
-    url = (
-        f"https://api.openweathermap.org/data/2.5/forecast?"
-        f"lat={lat}&lon={lon}&units={units}&appid={api_key}&lang={lang}"
-    )
-
-    data = get_json(url)
-    if not data or "list" not in data:
-        return None
-
-    current = data["list"][0]
-    forecasts = data["list"][8:32:8]
-
-    result = {
-        "current_temp": current["main"]["temp"],
-        "current_desc": current["weather"][0]["description"],
-        "forecast": []
-    }
-
-    for f in forecasts[:3]:
-        result["forecast"].append({
-            "temp": f["main"]["temp"]
-        })
-
-    return result
+WMO = {
+    0: "Clear sky",
+    1: "Mainly clear",
+    2: "Partly cloudy",
+    3: "Overcast",
+    45: "Fog",
+    61: "Light rain",
+    63: "Rain",
+    65: "Heavy rain",
+    71: "Snow",
+    95: "Thunderstorm"
+}
 
 
-# =========================
-# 🌤 OPEN-METEO
-# =========================
+def get_weather(lat, lon, unit):
 
-def get_open_meteo(lat, lon, unit):
+    cache_key = f"weather-{lat}-{lon}-{unit}"
+    cached = get_cache(cache_key)
+    if cached:
+        return cached
 
     temp_unit = "celsius" if unit == "metric" else "fahrenheit"
 
@@ -176,19 +150,18 @@ def get_open_meteo(lat, lon, unit):
     current = data["current_weather"]
     daily = data["daily"]
 
-    desc = WMO.get(current["weathercode"], "Weather")
-
     result = {
         "current_temp": current["temperature"],
-        "current_desc": desc,
+        "current_desc": WMO.get(current["weathercode"], "Weather"),
         "forecast": []
     }
 
     for i in range(1, 4):
-        result["forecast"].append({
-            "temp": f"{daily['temperature_2m_max'][i]} / {daily['temperature_2m_min'][i]}"
-        })
+        result["forecast"].append(
+            f"{daily['temperature_2m_max'][i]} / {daily['temperature_2m_min'][i]}"
+        )
 
+    set_cache(cache_key, result)
     return result
 
 
@@ -206,15 +179,17 @@ class WeatherHandler(EventListener):
 
     def on_event(self, event, extension):
 
-        prefs = extension.preferences
-        provider = prefs.get("provider", "open-meteo")
-        unit = prefs.get("unit", "metric")
-        api_key = prefs.get("api_key", "")
-        lang = prefs.get("language", "en")
+        global LAST_QUERY_TIME
 
+        now = time.time()
+        if now - LAST_QUERY_TIME < DEBOUNCE_DELAY:
+            return RenderResultListAction([])
+        LAST_QUERY_TIME = now
+
+        unit = extension.preferences.get("unit", "metric")
         query = event.get_argument()
 
-        # 📍 DEFINE LOCALIZAÇÃO
+        # 📍 LOCALIZAÇÃO
         if query:
             lat, lon, city, country = geocode_city(query)
             if not lat:
@@ -222,7 +197,7 @@ class WeatherHandler(EventListener):
                     SmallResultItem(
                         icon='images/icon.png',
                         name="Cidade não encontrada",
-                        description="Digite uma cidade válida para continuar",
+                        description="Digite uma cidade válida",
                         on_enter=DoNothingAction()
                     )
                 ])
@@ -232,36 +207,13 @@ class WeatherHandler(EventListener):
                 return RenderResultListAction([
                     SmallResultItem(
                         icon='images/icon.png',
-                        name="Falha na localização",
-                        description="Não foi possível detectar sua localização",
+                        name="Erro de localização",
+                        description="Não foi possível detectar",
                         on_enter=DoNothingAction()
                     )
                 ])
 
-        location_name = f"{city}, {country}" if country else city
-
-        # ☁ BUSCAR CLIMA (COM CACHE)
-        cache_key = f"{provider}-{lat}-{lon}-{unit}"
-        weather = get_cache(cache_key)
-
-        if not weather:
-            if provider == "openweather":
-                if not api_key:
-                    return RenderResultListAction([
-                        SmallResultItem(
-                            icon='images/icon.png',
-                            name="Missing OpenWeather API key",
-                            description="Add your API key in settings",
-                            on_enter=DoNothingAction()
-                        )
-                    ])
-                weather = get_openweather(lat, lon, unit, api_key, lang)
-            else:
-                weather = get_open_meteo(lat, lon, unit)
-
-            if weather:
-                set_cache(cache_key, weather)
-
+        weather = get_weather(lat, lon, unit)
         if not weather:
             return RenderResultListAction([
                 SmallResultItem(
@@ -273,17 +225,17 @@ class WeatherHandler(EventListener):
             ])
 
         symbol = "°C" if unit == "metric" else "°F"
-        forecast = " | ".join(f"{f['temp']}" for f in weather["forecast"])
+        flag = country_flag(country)
 
         desc = (
             f"{weather['current_temp']}{symbol} - {weather['current_desc']}\n"
-            f"Próximos dias: {forecast}"
+            f"Próximos dias: {' | '.join(weather['forecast'])}"
         )
 
         return RenderResultListAction([
             ExtensionResultItem(
                 icon='images/icon.png',
-                name=f"📍 {location_name}",
+                name=f"{flag} {city}, {country}",
                 description=desc,
                 on_enter=DoNothingAction()
             )
