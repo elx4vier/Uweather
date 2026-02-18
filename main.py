@@ -11,29 +11,33 @@ from ulauncher.api.client.EventListener import EventListener
 from ulauncher.api.shared.event import KeywordQueryEvent
 from ulauncher.api.shared.item.ExtensionResultItem import ExtensionResultItem
 from ulauncher.api.shared.action.RenderResultListAction import RenderResultListAction
+from ulauncher.api.shared.item.ExtensionSmallResultItem import ExtensionSmallResultItem
 
 logger = logging.getLogger(__name__)
-CACHE_TTL = 300
+CACHE_TTL = 300  # 5 minutos
+
 
 # ==============================
 # SESSION
 # ==============================
 def create_session():
     session = requests.Session()
-    retries = Retry(total=2, backoff_factor=0.3, status_forcelist=[500,502,503,504])
+    retries = Retry(total=2, backoff_factor=0.3, status_forcelist=[500, 502, 503, 504])
     adapter = HTTPAdapter(max_retries=retries)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
     return session
 
+
 # ==============================
 # UTILITÁRIOS
 # ==============================
 def country_flag(country_code):
-    if not country_code or len(country_code)!=2:
+    if not country_code or len(country_code) != 2:
         return ""
     offset = 127397
-    return chr(ord(country_code[0].upper())+offset) + chr(ord(country_code[1].upper())+offset)
+    return chr(ord(country_code[0].upper()) + offset) + chr(ord(country_code[1].upper()) + offset)
+
 
 # ==============================
 # WEATHER SERVICE
@@ -47,44 +51,39 @@ class WeatherService:
             geo = r.json()
             if "latitude" in geo:
                 return geo
-        except:
+        except Exception:
             pass
+
         try:
             r = session.get("http://ip-api.com/json/", timeout=5)
             geo = r.json()
             return {
                 "latitude": geo["lat"],
                 "longitude": geo["lon"],
-                "city": geo.get("city","Desconhecida"),
-                "country": geo.get("countryCode","BR")
+                "city": geo.get("city", "Desconhecida"),
+                "country": geo.get("countryCode", "BR")
             }
-        except:
+        except Exception:
             pass
+
         raise Exception("Falha na localização")
 
-    # ------------------------------
-    # OpenWeather
-    # ------------------------------
     @staticmethod
     def fetch_weather_openweather(session, api_key, city=None, lat=None, lon=None, unit="C"):
         if city:
-            url = f"https://api.openweathermap.org/data/2.5/forecast?q={city}&appid={api_key}&units={'metric' if unit=='C' else 'imperial'}&lang=pt_br"
+            url = f"https://api.openweathermap.org/data/2.5/forecast?q={city}&appid={api_key}&units={'metric' if unit == 'C' else 'imperial'}&lang=pt_br"
         else:
-            url = f"https://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={api_key}&units={'metric' if unit=='C' else 'imperial'}&lang=pt_br"
+            url = f"https://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={api_key}&units={'metric' if unit == 'C' else 'imperial'}&lang=pt_br"
 
         r = session.get(url, timeout=5)
         data = r.json()
         if r.status_code != 200 or data.get("cod") != "200":
-            raise Exception("Cidade não encontrada")
+            raise Exception("Cidade não encontrada ou API key inválida")
         return WeatherService.parse_weather(data)
 
-    # ------------------------------
-    # Open-Meteo
-    # ------------------------------
     @staticmethod
     def fetch_weather_openmeteo(session, city=None, lat=None, lon=None, unit="C"):
         if city and not lat and not lon:
-            # Busca coordenadas via geocoding gratuito
             r = session.get(f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1", timeout=5)
             geo = r.json().get("results")
             if not geo:
@@ -97,8 +96,12 @@ class WeatherService:
             city_name = city or "Desconhecida"
             country = "BR"
 
-        # Previsão diária
-        r = session.get(f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&daily=temperature_2m_max,temperature_2m_min,weathercode&current_weather=true&timezone=auto", timeout=5)
+        r = session.get(
+            f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
+            "&daily=temperature_2m_max,temperature_2m_min,weathercode"
+            "&current_weather=true&timezone=auto",
+            timeout=5
+        )
         data = r.json()
 
         forecast_list = []
@@ -117,8 +120,8 @@ class WeatherService:
             "city_name": city_name,
             "country": country,
             "current": {
-                "temp": int(current.get("temperature",0)),
-                "code": current.get("weathercode",0),
+                "temp": int(current.get("temperature", 0)),
+                "code": current.get("weathercode", 0),
                 "desc": "Desconhecido"
             },
             "forecast": forecast_list
@@ -138,14 +141,16 @@ class WeatherService:
             else:
                 daily[date]["max"] = max(daily[date]["max"], temp_max)
                 daily[date]["min"] = min(daily[date]["min"], temp_min)
+
         sorted_dates = sorted(daily.keys())
         forecast = []
-        for date in sorted_dates[1:3]:
+        for date in sorted_dates[1:3]:  # próximos 2 dias
             forecast.append({
                 "max": int(daily[date]["max"]),
                 "min": int(daily[date]["min"]),
                 "code": daily[date]["code"]
             })
+
         return {
             "city": f"{data['city']['name']}, {data['city']['country']}",
             "city_name": data['city']['name'],
@@ -158,6 +163,7 @@ class WeatherService:
             "forecast": forecast
         }
 
+
 # ==============================
 # EXTENSION
 # ==============================
@@ -169,11 +175,11 @@ class UWeather(Extension):
         self.session = create_session()
         self.cache = {}
         self.base_path = os.path.dirname(os.path.abspath(__file__))
-        self.icon_default = os.path.join(self.base_path,"images","icon.png")
+        self.icon_default = os.path.join(self.base_path, "images", "icon.png")
         threading.Thread(target=self.preload_weather, daemon=True).start()
 
     def icon(self, filename):
-        path = os.path.join(self.base_path,"images",filename)
+        path = os.path.join(self.base_path, "images", filename)
         return path if os.path.exists(path) else self.icon_default
 
     def preload_weather(self):
@@ -188,9 +194,10 @@ class UWeather(Extension):
                 lat=geo["latitude"],
                 lon=geo["longitude"]
             )
-            self.cache["auto"] = (data,time.time())
+            self.cache["auto"] = (data, time.time())
         except Exception as e:
             logger.error(f"Preload falhou: {e}")
+
 
 # ==============================
 # LISTENER
@@ -206,27 +213,27 @@ class WeatherListener(EventListener):
             static_location = extension.preferences.get("static_location")
             interface_mode = extension.preferences.get("interface_mode") or "complete"
 
-            query = event.get_argument()
+            query = event.get_argument().strip() if event.get_argument() else ""
             geo = None
+            key = None
 
-            if (not query or query.strip()=="") and location_mode=="auto":
-                query = None
+            if not query and location_mode == "auto":
                 geo = WeatherService.fetch_location(extension.session)
                 key = "auto"
-            elif (not query or query.strip()=="") and location_mode=="manual" and static_location:
+            elif not query and location_mode == "manual" and static_location:
                 query = static_location
                 key = query.lower()
             else:
-                key = query.lower().strip()
+                key = query.lower()
 
             # Cache
             if key in extension.cache:
                 data, ts = extension.cache[key]
-                if time.time()-ts < CACHE_TTL:
+                if time.time() - ts < CACHE_TTL:
                     return self.render(data, extension, interface_mode)
 
-            # Fetch weather
-            if provider=="openweather":
+            # Fetch
+            if provider == "openweather":
                 if query:
                     data = WeatherService.fetch_weather_openweather(
                         extension.session, api_key, city=query, unit=unit)
@@ -235,80 +242,87 @@ class WeatherListener(EventListener):
                         extension.session, api_key, lat=geo["latitude"], lon=geo["longitude"], unit=unit)
             else:
                 data = WeatherService.fetch_weather_openmeteo(
-                    extension.session, city=query,
+                    extension.session,
+                    city=query,
                     lat=geo["latitude"] if geo else None,
                     lon=geo["longitude"] if geo else None,
                     unit=unit
                 )
 
-            extension.cache[key] = (data,time.time())
+            extension.cache[key] = (data, time.time())
             return self.render(data, extension, interface_mode)
 
         except Exception as e:
             msg = str(e)
             name = "Erro ao obter clima"
-            desc = msg
+            desc = msg if len(msg) < 80 else msg[:77] + "..."
             icon = extension.icon("error.png")
             return RenderResultListAction([
                 ExtensionResultItem(icon=icon, name=name, description=desc, on_enter=None)
             ])
 
-    # ==============================
-    # RENDER
-    # ==============================
     def render(self, data, extension, interface_mode):
         city_name = data.get("city_name") or "Desconhecida"
         country = data.get("country") or "BR"
         flag = country_flag(country)
         temp = data["current"]["temp"]
-        desc = data["current"]["desc"]
+        desc = data["current"].get("desc", "Desconhecido").capitalize()
         forecast = data.get("forecast", [])
 
-        # -----------------------------
-        # Completo: 3 linhas, terceira linha menor
-        # -----------------------------
-        if interface_mode=="complete":
+        items = []
+
+        if interface_mode == "complete":
             line1 = f"{city_name}, {country} {flag}"
             line2 = f"{temp}º, {desc}"
             line3 = ""
-            if forecast:
-                tomorrow = forecast[0]
-                after = forecast[1] if len(forecast)>1 else None
-                parts = []
-                if tomorrow:
-                    parts.append(f"Amanhã: {tomorrow['min']}º / {tomorrow['max']}º")
-                if after:
-                    parts.append(f"Depois: {after['min']}º / {after['max']}º")
-                line3 = " | ".join(parts)
-            # terceira linha em description → fonte menor
-            name = f"{line1}\n{line2}"
-            description = line3
 
-        # -----------------------------
-        # Essencial: duas linhas, vírgula após temperatura
-        # -----------------------------
-        elif interface_mode=="essential":
+            if forecast:
+                parts = []
+                if len(forecast) >= 1:
+                    parts.append(f"Amanhã: {forecast[0]['min']}º / {forecast[0]['max']}º")
+                if len(forecast) >= 2:
+                    parts.append(f"Depois: {forecast[1]['min']}º / {forecast[1]['max']}º")
+                line3 = " | ".join(parts)
+
+            name = f"{line1}\n{line2}"
+            description = line3 if line3 else None
+
+            items.append(
+                ExtensionResultItem(
+                    icon=extension.icon("icon.png"),
+                    name=name,
+                    description=description,
+                    on_enter=None
+                )
+            )
+
+        elif interface_mode == "essential":
             line1 = f"{temp}º, {desc}"
             line2 = f"{city_name}, {country} {flag}"
-            name = line1
-            description = line2
 
-        # -----------------------------
-        # Mínimo: linha pequena, fonte simulada menor
-        # -----------------------------
-        elif interface_mode=="minimal":
-            name = f"{temp}º - {city_name} {flag}"
-            description = ""  # fonte menor simulada por estar vazio
-
-        return RenderResultListAction([
-            ExtensionResultItem(
-                icon=extension.icon("icon.png"),
-                name=name,
-                description=description,
-                on_enter=None
+            items.append(
+                ExtensionResultItem(
+                    icon=extension.icon("icon.png"),
+                    name=line1,
+                    description=line2,
+                    on_enter=None
+                )
             )
-        ])
+
+        elif interface_mode == "minimal":
+            # Modo super compacto
+            minimal_text = f"{temp}º – {city_name} {flag}"
+            # Se quiser ainda menor: minimal_text = f"{temp}º {flag}"
+
+            items.append(
+                ExtensionSmallResultItem(
+                    icon=extension.icon("icon.png"),
+                    name=minimal_text,
+                )
+            )
+
+        return RenderResultListAction(items)
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     UWeather().run()
