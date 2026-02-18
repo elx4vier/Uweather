@@ -2,8 +2,10 @@ import json
 import urllib.request
 import urllib.parse
 import time
-from ulauncher.api.client.EventListener import EventListener
+import logging
+
 from ulauncher.api.client.Extension import Extension
+from ulauncher.api.client.EventListener import EventListener
 from ulauncher.api.shared.event import KeywordQueryEvent
 from ulauncher.api.shared.item.ExtensionResultItem import ExtensionResultItem
 from ulauncher.api.shared.item.SmallResultItem import SmallResultItem
@@ -15,8 +17,7 @@ from ulauncher.api.shared.action.RenderResultListAction import RenderResultListA
 # =========================
 CACHE = {}
 CACHE_TTL = 600  # 10 minutos
-
-# Códigos WMO (apenas os mais comuns)
+LOG = logging.getLogger(__name__)
 WMO = {
     0: "Céu limpo",
     1: "Principalmente limpo",
@@ -34,31 +35,37 @@ WMO = {
 # ⚡ FUNÇÕES AUXILIARES
 # =========================
 def get_cache(key):
-    if key in CACHE and time.time() - CACHE[key]["time"] < CACHE_TTL:
-        return CACHE[key]["data"]
+    """Retorna dados do cache se não expirou."""
+    entry = CACHE.get(key)
+    if entry and (time.time() - entry["time"] < CACHE_TTL):
+        return entry["data"]
     return None
 
 def set_cache(key, data):
+    """Armazena dados no cache com timestamp."""
     CACHE[key] = {"time": time.time(), "data": data}
 
 def country_flag(code):
+    """Retorna bandeira emoji do país."""
     if not code:
         return ""
     return "".join(chr(127397 + ord(c)) for c in code.upper())
 
 def get_json(url):
+    """Faz requisição HTTP e retorna JSON."""
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=5) as response:
-            return json.loads(response.read().decode())
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return json.loads(resp.read().decode())
     except Exception as e:
-        print(f"Erro na requisição: {e}")
+        LOG.warning(f"Erro na requisição: {e}")
         return None
 
 # =========================
 # 📍 GEOCODING
 # =========================
 def geocode_city(city):
+    """Converte nome da cidade em latitude, longitude e país."""
     cache_key = f"geo-{city.lower()}"
     cached = get_cache(cache_key)
     if cached:
@@ -70,10 +77,10 @@ def geocode_city(city):
         result = (r["latitude"], r["longitude"], r["name"], r.get("country_code", ""))
         set_cache(cache_key, result)
         return result
-    # Retorna None para todos os valores quando não encontra
     return None, None, None, None
 
 def get_ip_location():
+    """Obtém localização aproximada pelo IP."""
     cached = get_cache("ip-location")
     if cached:
         return cached
@@ -85,13 +92,15 @@ def get_ip_location():
     return None, None, None, None
 
 # =========================
-# 🌤 WEATHER (Open-Meteo)
+# 🌤 WEATHER
 # =========================
-def get_weather(lat, lon, unit):
+def get_weather(lat, lon, unit="metric"):
+    """Obtém clima atual e previsão para os próximos dias."""
     cache_key = f"weather-{lat}-{lon}-{unit}"
     cached = get_cache(cache_key)
     if cached:
         return cached
+
     temp_unit = "celsius" if unit == "metric" else "fahrenheit"
     url = (
         f"https://api.open-meteo.com/v1/forecast?"
@@ -104,24 +113,29 @@ def get_weather(lat, lon, unit):
     data = get_json(url)
     if not data:
         return None
+
     current = data.get("current_weather")
     daily = data.get("daily")
     if not current or not daily:
         return None
+
     weather_code = current.get("weathercode")
     desc = WMO.get(weather_code, "")
+
+    forecast = []
+    try:
+        for i in range(1, min(4, len(daily["temperature_2m_max"]))):
+            max_temp = daily["temperature_2m_max"][i]
+            min_temp = daily["temperature_2m_min"][i]
+            forecast.append(f"{max_temp} / {min_temp}")
+    except Exception as e:
+        LOG.warning(f"Erro ao montar forecast: {e}")
+
     result = {
         "current_temp": current.get("temperature"),
         "current_desc": desc,
-        "forecast": []
+        "forecast": forecast
     }
-    try:
-        for i in range(1, min(4, len(daily["temperature_2m_max"]))):
-            result["forecast"].append(
-                f"{daily['temperature_2m_max'][i]} / {daily['temperature_2m_min'][i]}"
-            )
-    except:
-        pass
     set_cache(cache_key, result)
     return result
 
@@ -135,7 +149,6 @@ class UWeatherExtension(Extension):
 
 class KeywordQueryEventListener(EventListener):
     def on_event(self, event, extension):
-        # Obtém preferências
         unit = extension.preferences.get("unit", "metric")
         query = event.get_argument()
 
@@ -153,7 +166,6 @@ class KeywordQueryEventListener(EventListener):
                 ])
         else:
             lat, lon, city, country = geocode_city(query)
-            # Se a cidade não for encontrada, exibe mensagem clara
             if not lat:
                 return RenderResultListAction([
                     SmallResultItem(
@@ -164,7 +176,6 @@ class KeywordQueryEventListener(EventListener):
                     )
                 ])
 
-        # Obtém dados do clima
         weather = get_weather(lat, lon, unit)
         if not weather:
             return RenderResultListAction([
@@ -176,19 +187,14 @@ class KeywordQueryEventListener(EventListener):
                 )
             ])
 
-        # Formata a saída
         symbol = "°C" if unit == "metric" else "°F"
         flag = country_flag(country)
-        current_desc = weather["current_desc"]
         current_temp = weather["current_temp"]
+        current_desc = weather["current_desc"] or ""
         forecast = " | ".join(weather["forecast"])
 
-        if current_desc:
-            first_line = f"{current_temp}{symbol} - {current_desc}"
-        else:
-            first_line = f"{current_temp}{symbol}"
-
-        description = f"{first_line}\nPróximos dias: {forecast}"
+        first_line = f"{current_temp}{symbol} - {current_desc}" if current_desc else f"{current_temp}{symbol}"
+        description = f"{first_line}\nPróximos dias: {forecast}" if forecast else first_line
 
         return RenderResultListAction([
             ExtensionResultItem(
