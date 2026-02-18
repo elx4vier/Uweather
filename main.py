@@ -6,10 +6,8 @@ import time
 from ulauncher.api.client.EventListener import EventListener
 from ulauncher.api.client.Extension import Extension
 from ulauncher.api.shared.event import KeywordQueryEvent
-from ulauncher.api.shared.item.ExtensionResultItem import ExtensionResultItem
-from ulauncher.api.shared.item.SmallResultItem import SmallResultItem
-from ulauncher.api.shared.action.DoNothingAction import DoNothingAction
-from ulauncher.api.shared.action.RenderResultListAction import RenderResultListAction
+from ulauncher.api.shared.item import ExtensionResultItem, SmallResultItem
+from ulauncher.api.shared.action import DoNothingAction, RenderResultListAction
 
 
 # =========================
@@ -18,8 +16,77 @@ from ulauncher.api.shared.action.RenderResultListAction import RenderResultListA
 
 CACHE = {}
 CACHE_TTL = 600
-DEBOUNCE_DELAY = 0.4  # 400ms
-LAST_QUERY_TIME = 0
+
+
+# =========================
+# 🌍 TRANSLATIONS
+# =========================
+
+TEXTS = {
+    "en": {
+        "city_not_found": "City not found",
+        "type_valid_city": "Type a valid city name",
+        "location_error": "Could not detect your location",
+        "weather_error": "Error fetching weather",
+        "check_connection": "Check your internet connection",
+        "try_again": "Try again shortly",
+        "next_days": "Next days"
+    },
+    "pt": {
+        "city_not_found": "Cidade não encontrada",
+        "type_valid_city": "Digite uma cidade válida",
+        "location_error": "Não foi possível encontrar sua localização",
+        "weather_error": "Erro ao buscar clima",
+        "check_connection": "Verifique sua conexão com a internet",
+        "try_again": "Tente novamente em instantes",
+        "next_days": "Próximos dias"
+    },
+    "es": {
+        "city_not_found": "Ciudad no encontrada",
+        "type_valid_city": "Escribe una ciudad válida",
+        "location_error": "No se pudo detectar tu ubicación",
+        "weather_error": "Error al obtener el clima",
+        "check_connection": "Verifica tu conexión a internet",
+        "try_again": "Inténtalo de nuevo en breve",
+        "next_days": "Próximos días"
+    },
+    "fr": {
+        "city_not_found": "Ville non trouvée",
+        "type_valid_city": "Tapez une ville valide",
+        "location_error": "Impossible de détecter votre position",
+        "weather_error": "Erreur lors de la récupération météo",
+        "check_connection": "Vérifiez votre connexion internet",
+        "try_again": "Réessayez dans un instant",
+        "next_days": "Prochains jours"
+    },
+    "ru": {
+        "city_not_found": "Город не найден",
+        "type_valid_city": "Введите корректный город",
+        "location_error": "Не удалось определить ваше местоположение",
+        "weather_error": "Ошибка получения погоды",
+        "check_connection": "Проверьте интернет-соединение",
+        "try_again": "Попробуйте снова позже",
+        "next_days": "Ближайшие дни"
+    }
+}
+
+
+# =========================
+# 🌦 WMO CONDITIONS
+# =========================
+
+WMO = {
+    0: {"en": "Clear sky", "pt": "Céu limpo", "es": "Cielo despejado", "fr": "Ciel dégagé", "ru": "Ясно"},
+    1: {"en": "Mainly clear", "pt": "Predominantemente limpo", "es": "Mayormente despejado", "fr": "Principalement dégagé", "ru": "Преимущественно ясно"},
+    2: {"en": "Partly cloudy", "pt": "Parcialmente nublado", "es": "Parcialmente nublado", "fr": "Partiellement nuageux", "ru": "Переменная облачность"},
+    3: {"en": "Overcast", "pt": "Nublado", "es": "Nublado", "fr": "Couvert", "ru": "Пасмурно"},
+    45: {"en": "Fog", "pt": "Névoa", "es": "Niebla", "fr": "Brouillard", "ru": "Туман"},
+    61: {"en": "Light rain", "pt": "Chuva fraca", "es": "Lluvia ligera", "fr": "Pluie légère", "ru": "Небольшой дождь"},
+    63: {"en": "Rain", "pt": "Chuva", "es": "Lluvia", "fr": "Pluie", "ru": "Дождь"},
+    65: {"en": "Heavy rain", "pt": "Chuva forte", "es": "Lluvia intensa", "fr": "Forte pluie", "ru": "Сильный дождь"},
+    71: {"en": "Snow", "pt": "Neve", "es": "Nieve", "fr": "Neige", "ru": "Снег"},
+    95: {"en": "Thunderstorm", "pt": "Tempestade", "es": "Tormenta", "fr": "Orage", "ru": "Гроза"},
+}
 
 
 # =========================
@@ -34,16 +101,6 @@ def get_cache(key):
 
 def set_cache(key, data):
     CACHE[key] = {"time": time.time(), "data": data}
-
-
-# =========================
-# 🏳 COUNTRY FLAG
-# =========================
-
-def country_flag(code):
-    if not code:
-        return ""
-    return "".join(chr(127397 + ord(c)) for c in code.upper())
 
 
 # =========================
@@ -64,73 +121,26 @@ def get_json(url):
 # =========================
 
 def geocode_city(city):
-
-    cache_key = f"geo-{city.lower()}"
-    cached = get_cache(cache_key)
-    if cached:
-        return cached
-
     url = f"https://geocoding-api.open-meteo.com/v1/search?name={urllib.parse.quote(city)}&count=1"
     data = get_json(url)
-
     if data and data.get("results"):
         r = data["results"][0]
-        result = (
-            r["latitude"],
-            r["longitude"],
-            r["name"],
-            r.get("country_code", "")
-        )
-        set_cache(cache_key, result)
-        return result
-
+        return r["latitude"], r["longitude"], r["name"], r.get("country_code", "")
     return None, None, None, None
 
 
 def get_ip_location():
-
-    cached = get_cache("ip-location")
-    if cached:
-        return cached
-
     data = get_json("http://ip-api.com/json/")
     if data and data.get("status") == "success":
-        result = (
-            data["lat"],
-            data["lon"],
-            data["city"],
-            data["countryCode"]
-        )
-        set_cache("ip-location", result)
-        return result
-
+        return data["lat"], data["lon"], data["city"], data["countryCode"]
     return None, None, None, None
 
 
 # =========================
-# 🌤 WEATHER (OPEN-METEO)
+# 🌤 WEATHER PROVIDERS
 # =========================
 
-WMO = {
-    0: "Clear sky",
-    1: "Mainly clear",
-    2: "Partly cloudy",
-    3: "Overcast",
-    45: "Fog",
-    61: "Light rain",
-    63: "Rain",
-    65: "Heavy rain",
-    71: "Snow",
-    95: "Thunderstorm"
-}
-
-
-def get_weather(lat, lon, unit):
-
-    cache_key = f"weather-{lat}-{lon}-{unit}"
-    cached = get_cache(cache_key)
-    if cached:
-        return cached
+def get_weather_openmeteo(lat, lon, unit, lang):
 
     temp_unit = "celsius" if unit == "metric" else "fahrenheit"
 
@@ -150,19 +160,42 @@ def get_weather(lat, lon, unit):
     current = data["current_weather"]
     daily = data["daily"]
 
-    result = {
-        "current_temp": current["temperature"],
-        "current_desc": WMO.get(current["weathercode"], "Weather"),
-        "forecast": []
+    desc = None
+    if current["weathercode"] in WMO:
+        desc = WMO[current["weathercode"]].get(lang)
+
+    return {
+        "temp": current["temperature"],
+        "desc": desc,
+        "forecast": [
+            f"{daily['temperature_2m_max'][i]} / {daily['temperature_2m_min'][i]}"
+            for i in range(1, 4)
+        ]
     }
 
-    for i in range(1, 4):
-        result["forecast"].append(
-            f"{daily['temperature_2m_max'][i]} / {daily['temperature_2m_min'][i]}"
-        )
 
-    set_cache(cache_key, result)
-    return result
+def get_weather_openweather(lat, lon, unit, api_key, lang):
+
+    if not api_key:
+        return None
+
+    url = (
+        f"https://api.openweathermap.org/data/2.5/onecall?"
+        f"lat={lat}&lon={lon}&units={unit}&lang={lang}&appid={api_key}"
+    )
+
+    data = get_json(url)
+    if not data:
+        return None
+
+    return {
+        "temp": data["current"]["temp"],
+        "desc": data["current"]["weather"][0]["description"].capitalize(),
+        "forecast": [
+            f"{d['temp']['max']} / {d['temp']['min']}"
+            for d in data["daily"][1:4]
+        ]
+    }
 
 
 # =========================
@@ -179,64 +212,70 @@ class WeatherHandler(EventListener):
 
     def on_event(self, event, extension):
 
-        global LAST_QUERY_TIME
+        prefs = extension.preferences
+        lang = prefs.get("language", "en")
+        texts = TEXTS.get(lang, TEXTS["en"])
 
-        now = time.time()
-        if now - LAST_QUERY_TIME < DEBOUNCE_DELAY:
-            return RenderResultListAction([])
-        LAST_QUERY_TIME = now
+        unit = prefs.get("unit", "metric")
+        provider = prefs.get("provider", "openmeteo")
+        location_mode = prefs.get("location_mode", "auto")
+        static_city = prefs.get("static_city", "")
+        api_key = prefs.get("api_key", "")
+        view_mode = prefs.get("view_mode", "3")
 
-        unit = extension.preferences.get("unit", "metric")
         query = event.get_argument()
 
-        # 📍 LOCALIZAÇÃO
-        if query:
+        # LOCATION
+        if location_mode == "manual" and static_city:
+            lat, lon, city, country = geocode_city(static_city)
+        elif query:
             lat, lon, city, country = geocode_city(query)
-            if not lat:
-                return RenderResultListAction([
-                    SmallResultItem(
-                        icon='images/icon.png',
-                        name="Cidade não encontrada",
-                        description="Digite uma cidade válida",
-                        on_enter=DoNothingAction()
-                    )
-                ])
         else:
             lat, lon, city, country = get_ip_location()
-            if not lat:
-                return RenderResultListAction([
-                    SmallResultItem(
-                        icon='images/icon.png',
-                        name="Erro de localização",
-                        description="Não foi possível detectar",
-                        on_enter=DoNothingAction()
-                    )
-                ])
 
-        weather = get_weather(lat, lon, unit)
+        if not lat:
+            return RenderResultListAction([
+                SmallResultItem(
+                    icon='images/icon.png',
+                    name=texts["city_not_found"],
+                    description=texts["type_valid_city"],
+                    on_enter=DoNothingAction()
+                )
+            ])
+
+        # WEATHER
+        if provider == "openweather":
+            weather = get_weather_openweather(lat, lon, unit, api_key, lang)
+        else:
+            weather = get_weather_openmeteo(lat, lon, unit, lang)
+
         if not weather:
             return RenderResultListAction([
                 SmallResultItem(
                     icon='images/icon.png',
-                    name="Erro ao buscar clima",
-                    description="Tente novamente",
+                    name=texts["weather_error"],
+                    description=texts["try_again"],
                     on_enter=DoNothingAction()
                 )
             ])
 
         symbol = "°C" if unit == "metric" else "°F"
-        flag = country_flag(country)
 
-        desc = (
-            f"{weather['current_temp']}{symbol} - {weather['current_desc']}\n"
-            f"Próximos dias: {' | '.join(weather['forecast'])}"
-        )
+        if weather["desc"]:
+            first_line = f"{weather['temp']}{symbol} - {weather['desc']}"
+        else:
+            first_line = f"{weather['temp']}{symbol}"
+
+        description = first_line
+
+        if view_mode in ["4", "5"]:
+            description += f"\n{texts['next_days']}: {' | '.join(weather['forecast'])}"
 
         return RenderResultListAction([
             ExtensionResultItem(
                 icon='images/icon.png',
-                name=f"{flag} {city}, {country}",
-                description=desc,
+                name=f"{city}, {country}",
+                description=description,
                 on_enter=DoNothingAction()
             )
         ])
