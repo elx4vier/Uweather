@@ -16,7 +16,6 @@
       "name": "Palavra-chave",
       "default_value": "clima"
     },
-
     {
       "id": "api_key",
       "type": "input",
@@ -24,10 +23,9 @@
       "description": "Necessária apenas se usar OpenWeather",
       "default_value": ""
     },
-
     {
       "id": "provider",
-      "type": "dropdown",
+      "type": "select",
       "name": "Provedor de Clima",
       "default_value": "openweather",
       "options": [
@@ -35,10 +33,9 @@
         { "name": "Open-Meteo", "value": "openmeteo" }
       ]
     },
-
     {
       "id": "unit",
-      "type": "dropdown",
+      "type": "select",
       "name": "Unidade de Temperatura",
       "default_value": "metric",
       "options": [
@@ -46,10 +43,9 @@
         { "name": "Fahrenheit (°F)", "value": "imperial" }
       ]
     },
-
     {
       "id": "location_mode",
-      "type": "dropdown",
+      "type": "select",
       "name": "Modo de Localização",
       "default_value": "auto",
       "options": [
@@ -57,7 +53,6 @@
         { "name": "Cidade fixa", "value": "static" }
       ]
     },
-
     {
       "id": "static_city",
       "type": "input",
@@ -65,25 +60,23 @@
       "description": "Usada apenas se modo for 'Cidade fixa'",
       "default_value": ""
     },
-
     {
       "id": "view_mode",
-      "type": "dropdown",
+      "type": "select",
       "name": "Modo de Visualização",
       "default_value": "full",
       "options": [
-        { "name": "1 - Completo (cidade, temp, descrição, 3 dias)", "value": "full" },
-        { "name": "2 - Compacto (cidade + temp + amanhã)", "value": "compact" },
-        { "name": "3 - Minimal (cidade + temp)", "value": "minimal" },
-        { "name": "4 - Ultra minimal (temp apenas)", "value": "ultra" },
-        { "name": "5 - Linha única (cidade - temp - amanhã)", "value": "singleline" }
+        { "name": "1 - Completo", "value": "full" },
+        { "name": "2 - Compacto", "value": "compact" },
+        { "name": "3 - Minimal", "value": "minimal" },
+        { "name": "4 - Ultra minimal", "value": "ultra" },
+        { "name": "5 - Linha única", "value": "singleline" }
       ]
     },
-
     {
       "id": "language",
-      "type": "dropdown",
-      "name": "Idioma da Extensão",
+      "type": "select",
+      "name": "Idioma",
       "default_value": "pt",
       "options": [
         { "name": "Português", "value": "pt" },
