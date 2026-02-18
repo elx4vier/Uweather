@@ -3,7 +3,7 @@
   "required_api_version": "^2.0.0",
   "name": "UWeather",
   "display_name": "UWeather - Current Weather + 3 Days",
-  "description": "Current weather and 3-day forecast with smart cache and multi-provider support.",
+  "description": "Current weather and 3-day forecast with multi-provider support.",
   "developer_name": "Xavier",
   "icon": "images/icon.png",
   "options": {
@@ -21,7 +21,6 @@
       "id": "provider",
       "type": "select",
       "name": "Weather Provider",
-      "description": "Choose which weather service should provide the data.",
       "default_value": "openweather",
       "options": [
         { "text": "OpenWeather (requires API key)", "value": "openweather" },
@@ -32,14 +31,13 @@
       "id": "api_key",
       "type": "input",
       "name": "OpenWeather API Key",
-      "description": "Required only if OpenWeather is selected as provider.",
+      "description": "Get your free API key at openweathermap.org → Sign up → API keys.",
       "default_value": ""
     },
     {
       "id": "unit",
       "type": "select",
       "name": "Temperature Unit",
-      "description": "Select how temperature values should be displayed.",
       "default_value": "metric",
       "options": [
         { "text": "Celsius (°C)", "value": "metric" },
@@ -50,18 +48,17 @@
       "id": "location_mode",
       "type": "select",
       "name": "Location Mode",
-      "description": "Choose automatic detection (IP-based) or a fixed city.",
       "default_value": "auto",
       "options": [
-        { "text": "Automatic (detect via IP)", "value": "auto" },
-        { "text": "Static city", "value": "static" }
+        { "text": "Automatic", "value": "auto" },
+        { "text": "Manual", "value": "manual" }
       ]
     },
     {
       "id": "static_city",
       "type": "input",
-      "name": "Static City",
-      "description": "Used only if Location Mode is set to 'Static city'.",
+      "name": "Manual City",
+      "description": "Enter the city name (used only when Location Mode is set to Manual).",
       "default_value": ""
     },
     {
@@ -69,13 +66,13 @@
       "type": "select",
       "name": "Display Mode",
       "description": "Choose how detailed the weather information should appear.",
-      "default_value": "full",
+      "default_value": 5,
       "options": [
-        { "text": "Full (current + 2 days)", "value": "full" },
-        { "text": "Compact", "value": "compact" },
-        { "text": "Minimal", "value": "minimal" },
-        { "text": "Ultra Minimal", "value": "ultra" },
-        { "text": "Single Line", "value": "singleline" }
+        { "text": "Ultra Minimal", "value": 1 },
+        { "text": "Minimal", "value": 2 },
+        { "text": "Compact", "value": 3 },
+        { "text": "Full", "value": 4 },
+        { "text": "Detailed (current + forecast)", "value": 5 }
       ]
     },
     {
