@@ -28,8 +28,8 @@
       "name": "Provedor de Clima",
       "default_value": "openweather",
       "options": [
-        { "name": "OpenWeather", "value": "openweather" },
-        { "name": "Open-Meteo", "value": "openmeteo" }
+        { "text": "OpenWeather", "value": "openweather" },
+        { "text": "Open-Meteo", "value": "openmeteo" }
       ]
     },
     {
@@ -38,8 +38,8 @@
       "name": "Unidade",
       "default_value": "metric",
       "options": [
-        { "name": "Celsius (°C)", "value": "metric" },
-        { "name": "Fahrenheit (°F)", "value": "imperial" }
+        { "text": "Celsius (°C)", "value": "metric" },
+        { "text": "Fahrenheit (°F)", "value": "imperial" }
       ]
     },
     {
@@ -48,8 +48,8 @@
       "name": "Modo de Localização",
       "default_value": "auto",
       "options": [
-        { "name": "Automática (IP)", "value": "auto" },
-        { "name": "Cidade fixa", "value": "static" }
+        { "text": "Automática (IP)", "value": "auto" },
+        { "text": "Cidade fixa", "value": "static" }
       ]
     },
     {
@@ -64,11 +64,11 @@
       "name": "Visualização",
       "default_value": "full",
       "options": [
-        { "name": "Completo", "value": "full" },
-        { "name": "Compacto", "value": "compact" },
-        { "name": "Minimal", "value": "minimal" },
-        { "name": "Ultra minimal", "value": "ultra" },
-        { "name": "Linha única", "value": "singleline" }
+        { "text": "Completo", "value": "full" },
+        { "text": "Compacto", "value": "compact" },
+        { "text": "Minimal", "value": "minimal" },
+        { "text": "Ultra minimal", "value": "ultra" },
+        { "text": "Linha única", "value": "singleline" }
       ]
     },
     {
@@ -77,11 +77,11 @@
       "name": "Idioma",
       "default_value": "pt",
       "options": [
-        { "name": "Português", "value": "pt" },
-        { "name": "English", "value": "en" },
-        { "name": "Español", "value": "es" },
-        { "name": "Русский", "value": "ru" },
-        { "name": "Français", "value": "fr" }
+        { "text": "Português", "value": "pt" },
+        { "text": "English", "value": "en" },
+        { "text": "Español", "value": "es" },
+        { "text": "Русский", "value": "ru" },
+        { "text": "Français", "value": "fr" }
       ]
     }
   ]
