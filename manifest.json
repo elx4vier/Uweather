@@ -2,8 +2,8 @@
   "manifest_version": "2",
   "required_api_version": "^2.0.0",
   "name": "UWeather",
-  "display_name": "UWeather - Clima Atual + 3 Dias",
-  "description": "Clima atual e previsão automática com cache inteligente.",
+  "display_name": "UWeather - Current Weather + 3 Days",
+  "description": "Current weather and 3-day forecast with smart cache and multi-provider support.",
   "developer_name": "Xavier",
   "icon": "images/icon.png",
   "options": {
@@ -13,29 +13,33 @@
     {
       "id": "keyword",
       "type": "keyword",
-      "name": "Palavra-chave",
-      "default_value": "w"
+      "name": "Keyword",
+      "default_value": "w",
+      "description": "Type this keyword to trigger the weather search."
+    },
+    {
+      "id": "provider",
+      "type": "select",
+      "name": "Weather Provider",
+      "description": "Choose which weather service should provide the data.",
+      "default_value": "openweather",
+      "options": [
+        { "text": "OpenWeather (requires API key)", "value": "openweather" },
+        { "text": "Open-Meteo (no API key required)", "value": "openmeteo" }
+      ]
     },
     {
       "id": "api_key",
       "type": "input",
       "name": "OpenWeather API Key",
+      "description": "Required only if OpenWeather is selected as provider.",
       "default_value": ""
-    },
-    {
-      "id": "provider",
-      "type": "select",
-      "name": "Provedor de Clima",
-      "default_value": "openweather",
-      "options": [
-        { "text": "OpenWeather", "value": "openweather" },
-        { "text": "Open-Meteo", "value": "openmeteo" }
-      ]
     },
     {
       "id": "unit",
       "type": "select",
-      "name": "Unidade",
+      "name": "Temperature Unit",
+      "description": "Select how temperature values should be displayed.",
       "default_value": "metric",
       "options": [
         { "text": "Celsius (°C)", "value": "metric" },
@@ -45,40 +49,44 @@
     {
       "id": "location_mode",
       "type": "select",
-      "name": "Modo de Localização",
+      "name": "Location Mode",
+      "description": "Choose automatic detection (IP-based) or a fixed city.",
       "default_value": "auto",
       "options": [
-        { "text": "Automática (IP)", "value": "auto" },
-        { "text": "Cidade fixa", "value": "static" }
+        { "text": "Automatic (detect via IP)", "value": "auto" },
+        { "text": "Static city", "value": "static" }
       ]
     },
     {
       "id": "static_city",
       "type": "input",
-      "name": "Cidade Fixa",
+      "name": "Static City",
+      "description": "Used only if Location Mode is set to 'Static city'.",
       "default_value": ""
     },
     {
       "id": "view_mode",
       "type": "select",
-      "name": "Visualização",
+      "name": "Display Mode",
+      "description": "Choose how detailed the weather information should appear.",
       "default_value": "full",
       "options": [
-        { "text": "Completo", "value": "full" },
-        { "text": "Compacto", "value": "compact" },
+        { "text": "Full (current + 2 days)", "value": "full" },
+        { "text": "Compact", "value": "compact" },
         { "text": "Minimal", "value": "minimal" },
-        { "text": "Ultra minimal", "value": "ultra" },
-        { "text": "Linha única", "value": "singleline" }
+        { "text": "Ultra Minimal", "value": "ultra" },
+        { "text": "Single Line", "value": "singleline" }
       ]
     },
     {
       "id": "language",
       "type": "select",
-      "name": "Idioma",
-      "default_value": "pt",
+      "name": "Language",
+      "description": "Select the interface language of the extension.",
+      "default_value": "en",
       "options": [
-        { "text": "Português", "value": "pt" },
         { "text": "English", "value": "en" },
+        { "text": "Português", "value": "pt" },
         { "text": "Español", "value": "es" },
         { "text": "Русский", "value": "ru" },
         { "text": "Français", "value": "fr" }
