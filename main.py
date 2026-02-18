@@ -16,7 +16,59 @@ CACHE_TTL = 300
 
 
 # =========================
-# SAFE SESSION
+# TRANSLATIONS
+# =========================
+TRANSLATIONS = {
+    "en": {
+        "tomorrow": "Tomorrow",
+        "after": "Next",
+        "location_error": "Could not detect your location",
+        "city_not_found": "City not found",
+        "set_static_city": "Set a static city in settings",
+        "api_missing": "Define your OpenWeather API key",
+        "provider_invalid": "Invalid provider"
+    },
+    "pt": {
+        "tomorrow": "Amanhã",
+        "after": "Depois",
+        "location_error": "Não foi possível detectar sua localização",
+        "city_not_found": "Cidade não encontrada",
+        "set_static_city": "Defina uma cidade fixa nas configurações",
+        "api_missing": "Defina sua API Key do OpenWeather",
+        "provider_invalid": "Provedor inválido"
+    },
+    "es": {
+        "tomorrow": "Mañana",
+        "after": "Después",
+        "location_error": "No se pudo detectar su ubicación",
+        "city_not_found": "Ciudad no encontrada",
+        "set_static_city": "Defina una ciudad fija en la configuración",
+        "api_missing": "Defina su API Key de OpenWeather",
+        "provider_invalid": "Proveedor inválido"
+    },
+    "ru": {
+        "tomorrow": "Завтра",
+        "after": "Далее",
+        "location_error": "Не удалось определить местоположение",
+        "city_not_found": "Город не найден",
+        "set_static_city": "Укажите фиксированный город в настройках",
+        "api_missing": "Укажите API ключ OpenWeather",
+        "provider_invalid": "Неверный провайдер"
+    },
+    "fr": {
+        "tomorrow": "Demain",
+        "after": "Après",
+        "location_error": "Impossible de détecter votre position",
+        "city_not_found": "Ville introuvable",
+        "set_static_city": "Définissez une ville fixe dans les paramètres",
+        "api_missing": "Définissez votre clé API OpenWeather",
+        "provider_invalid": "Fournisseur invalide"
+    }
+}
+
+
+# =========================
+# SESSION
 # =========================
 def create_session():
     session = requests.Session()
@@ -35,7 +87,6 @@ class WeatherService:
 
     @staticmethod
     def fetch_location(session):
-        # Serviço 1
         try:
             r = session.get("https://ipapi.co/json/", timeout=5)
             geo = r.json()
@@ -43,12 +94,11 @@ class WeatherService:
                 return {
                     "latitude": geo["latitude"],
                     "longitude": geo["longitude"],
-                    "city": geo.get("city", "Localização Atual")
+                    "city": geo.get("city")
                 }
         except:
             pass
 
-        # Serviço 2 fallback
         try:
             r = session.get("http://ip-api.com/json/", timeout=5)
             geo = r.json()
@@ -56,21 +106,18 @@ class WeatherService:
                 return {
                     "latitude": geo["lat"],
                     "longitude": geo["lon"],
-                    "city": geo.get("city", "Localização Atual")
+                    "city": geo.get("city")
                 }
         except:
             pass
 
         return None
 
-    # -------------------------
-    # OPENWEATHER
-    # -------------------------
     @staticmethod
-    def fetch_openweather(session, api_key, unit, city=None, lat=None, lon=None, lang="pt"):
+    def fetch_openweather(session, api_key, unit, lang, city=None, lat=None, lon=None):
 
         if not api_key:
-            raise Exception("Defina sua API Key do OpenWeather")
+            raise Exception("api_missing")
 
         base = "https://api.openweathermap.org/data/2.5/forecast"
 
@@ -80,11 +127,10 @@ class WeatherService:
             url = f"{base}?lat={lat}&lon={lon}&appid={api_key}&units={unit}&lang={lang}"
 
         r = session.get(url, timeout=6)
-
         data = r.json()
 
         if r.status_code != 200 or data.get("cod") != "200":
-            raise Exception("Cidade não encontrada")
+            raise Exception("city_not_found")
 
         current = data["list"][0]
         city_name = f"{data['city']['name']}, {data['city']['country']}"
@@ -116,9 +162,6 @@ class WeatherService:
             "forecast": forecast
         }
 
-    # -------------------------
-    # OPEN-METEO
-    # -------------------------
     @staticmethod
     def geocode_openmeteo(session, city):
         url = "https://geocoding-api.open-meteo.com/v1/search"
@@ -126,7 +169,7 @@ class WeatherService:
         data = r.json()
 
         if not data.get("results"):
-            raise Exception("Cidade não encontrada")
+            raise Exception("city_not_found")
 
         result = data["results"][0]
 
@@ -137,10 +180,9 @@ class WeatherService:
         }
 
     @staticmethod
-    def fetch_openmeteo(session, lat, lon, unit="metric"):
+    def fetch_openmeteo(session, lat, lon, unit):
 
         base = "https://api.open-meteo.com/v1/forecast"
-
         temp_unit = "celsius" if unit == "metric" else "fahrenheit"
 
         params = {
@@ -156,10 +198,9 @@ class WeatherService:
         data = r.json()
 
         if "current_weather" not in data:
-            raise Exception("Erro no Open-Meteo")
+            raise Exception("city_not_found")
 
         current_temp = int(data["current_weather"]["temperature"])
-
         daily_max = data["daily"]["temperature_2m_max"]
         daily_min = data["daily"]["temperature_2m_min"]
 
@@ -171,7 +212,7 @@ class WeatherService:
             })
 
         return {
-            "city": "Localização Atual",
+            "city": "",
             "temp": current_temp,
             "forecast": forecast
         }
@@ -188,11 +229,9 @@ class UWeather(Extension):
         self.session = create_session()
         self.cache = {}
         self.base_path = os.path.dirname(os.path.abspath(__file__))
-        self.icon_default = os.path.join(self.base_path, "images", "icon.png")
 
-    def icon(self, name):
-        path = os.path.join(self.base_path, "images", name)
-        return path if os.path.exists(path) else self.icon_default
+    def icon(self):
+        return os.path.join(self.base_path, "images", "icon.png")
 
 
 # =========================
@@ -204,55 +243,47 @@ class WeatherListener(EventListener):
         return prefs.get(key) or default
 
     def on_event(self, event, extension):
-        try:
-            prefs = extension.preferences or {}
 
+        prefs = extension.preferences or {}
+        lang = self.safe(prefs, "language", "en")
+        T = TRANSLATIONS.get(lang, TRANSLATIONS["en"])
+
+        try:
             provider = self.safe(prefs, "provider", "openweather")
             unit = self.safe(prefs, "unit", "metric")
             location_mode = self.safe(prefs, "location_mode", "auto")
             api_key = prefs.get("api_key")
 
             query = event.get_argument()
-            cache_key = f"{provider}-{unit}-{query or 'auto'}"
+
+            cache_key = f"{provider}-{unit}-{query or 'auto'}-{lang}"
 
             if cache_key in extension.cache:
                 data, ts = extension.cache[cache_key]
                 if time.time() - ts < CACHE_TTL:
-                    return self.render(data, extension)
+                    return self.render(data, extension, T)
 
-            # =========================
-            # DEFINIR LOCALIZAÇÃO
-            # =========================
             geo = None
             city = None
 
             if query:
                 city = query
-
             elif location_mode == "static":
                 city = prefs.get("static_city")
                 if not city:
-                    raise Exception("Defina uma cidade fixa nas configurações")
-
+                    raise Exception("set_static_city")
             else:
                 geo = WeatherService.fetch_location(extension.session)
                 if not geo:
-                    raise Exception("Não foi possível detectar sua localização")
+                    raise Exception("location_error")
 
-            # =========================
-            # PROVIDER
-            # =========================
             if provider == "openweather":
-
-                if city:
-                    data = WeatherService.fetch_openweather(
-                        extension.session, api_key, unit, city=city
-                    )
-                else:
-                    data = WeatherService.fetch_openweather(
-                        extension.session, api_key, unit,
-                        lat=geo["latitude"], lon=geo["longitude"]
-                    )
+                data = WeatherService.fetch_openweather(
+                    extension.session, api_key, unit, lang,
+                    city=city,
+                    lat=geo["latitude"] if geo else None,
+                    lon=geo["longitude"] if geo else None
+                )
 
             elif provider == "openmeteo":
 
@@ -273,25 +304,27 @@ class WeatherListener(EventListener):
                     data["city"] = geo["city"]
 
             else:
-                raise Exception("Provedor inválido")
+                raise Exception("provider_invalid")
 
             extension.cache[cache_key] = (data, time.time())
-            return self.render(data, extension)
+            return self.render(data, extension, T)
 
         except Exception as e:
-            logger.error(str(e))
+            key = str(e)
+            message = T.get(key, key)
+
             return RenderResultListAction([
                 ExtensionResultItem(
-                    icon=extension.icon("icon.png"),
-                    name=str(e),
+                    icon=extension.icon(),
+                    name=message,
                     description="",
                     on_enter=None
                 )
             ])
 
-    def render(self, data, extension):
+    def render(self, data, extension, T):
 
-        city = data["city"]
+        city = data["city"] or ""
         temp = data["temp"]
         forecast = data["forecast"]
 
@@ -300,15 +333,15 @@ class WeatherListener(EventListener):
 
         desc = ""
         if tomorrow:
-            desc += f"Amanhã: {tomorrow['min']}°/{tomorrow['max']}°"
+            desc += f"{T['tomorrow']}: {tomorrow['min']}°/{tomorrow['max']}°"
         if after:
-            desc += f" | Depois: {after['min']}°/{after['max']}°"
+            desc += f" | {T['after']}: {after['min']}°/{after['max']}°"
 
         name = f"{city}\n{temp}°"
 
         return RenderResultListAction([
             ExtensionResultItem(
-                icon=extension.icon("icon.png"),
+                icon=extension.icon(),
                 name=name,
                 description=desc,
                 on_enter=None
