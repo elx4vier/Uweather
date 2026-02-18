@@ -30,7 +30,6 @@ def create_session():
 # UTILITÁRIOS
 # ==============================
 def country_flag(country_code):
-    # Converte código de país para emoji de bandeira
     if not country_code or len(country_code)!=2:
         return ""
     offset = 127397
@@ -58,6 +57,9 @@ class WeatherService:
             pass
         raise Exception("Falha na localização")
 
+    # ------------------------------
+    # OpenWeather
+    # ------------------------------
     @staticmethod
     def fetch_weather_openweather(session, api_key, city=None, lat=None, lon=None, unit="C"):
         if city:
@@ -69,8 +71,49 @@ class WeatherService:
         data = r.json()
         if r.status_code != 200 or data.get("cod") != "200":
             raise Exception("Cidade não encontrada")
-
         return WeatherService.parse_weather(data)
+
+    # ------------------------------
+    # Open-Meteo
+    # ------------------------------
+    @staticmethod
+    def fetch_weather_openmeteo(session, city=None, lat=None, lon=None, unit="C"):
+        if city and not lat and not lon:
+            # Busca coordenadas via geocoding gratuito
+            r = session.get(f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1", timeout=5)
+            geo = r.json().get("results")
+            if not geo:
+                raise Exception("Cidade não encontrada")
+            lat = geo[0]["latitude"]
+            lon = geo[0]["longitude"]
+            city_name = geo[0]["name"]
+            country = geo[0]["country_code"]
+        else:
+            city_name = city or "Desconhecida"
+            country = "BR"
+
+        # Previsão diária
+        r = session.get(f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&daily=temperature_2m_max,temperature_2m_min,weathercode&current_weather=true&timezone=auto", timeout=5)
+        data = r.json()
+
+        forecast_list = []
+        daily = data.get("daily", {})
+        if "temperature_2m_max" in daily and "temperature_2m_min" in daily:
+            for i in range(min(2, len(daily["temperature_2m_max"]))):
+                forecast_list.append({"max": int(daily["temperature_2m_max"][i]), "min": int(daily["temperature_2m_min"][i]), "code": daily["weathercode"][i]})
+
+        current = data.get("current_weather", {})
+        return {
+            "city": f"{city_name}, {country}",
+            "city_name": city_name,
+            "country": country,
+            "current": {
+                "temp": int(current.get("temperature",0)),
+                "code": current.get("weathercode",0),
+                "desc": "Desconhecido"
+            },
+            "forecast": forecast_list
+        }
 
     @staticmethod
     def parse_weather(data):
@@ -138,35 +181,34 @@ class WeatherListener(EventListener):
             api_key = extension.preferences.get("api_key")
             unit = extension.preferences.get("unit") or "C"
             location_mode = extension.preferences.get("location_mode") or "auto"
-            static_city = extension.preferences.get("static_city")
+            static_location = extension.preferences.get("static_location")
             interface_mode = extension.preferences.get("interface_mode") or "complete"
 
             query = event.get_argument()
+            geo = None
+
             if (not query or query.strip()=="") and location_mode=="auto":
                 query = None
                 geo = WeatherService.fetch_location(extension.session)
                 key = "auto"
-            elif (not query or query.strip()=="") and location_mode=="manual" and static_city:
-                query = static_city
+            elif (not query or query.strip()=="") and location_mode=="manual" and static_location:
+                query = static_location
                 key = query.lower()
             else:
                 key = query.lower().strip()
 
-            # cache
             if key in extension.cache:
                 data, ts = extension.cache[key]
                 if time.time()-ts < CACHE_TTL:
                     return self.render(data, extension, interface_mode)
 
-            # fetch
             if provider=="openweather":
                 if query:
                     data = WeatherService.fetch_weather_openweather(extension.session, api_key, city=query, unit=unit)
                 else:
                     data = WeatherService.fetch_weather_openweather(extension.session, api_key, lat=geo["latitude"], lon=geo["longitude"], unit=unit)
             else:
-                # placeholder Open-Meteo
-                data = {"city": query or geo.get("city","Desconhecida"), "current":{"temp":0,"code":0,"desc":""},"forecast":[],"city_name":geo.get("city","Desconhecida"),"country":geo.get("country","BR")}
+                data = WeatherService.fetch_weather_openmeteo(extension.session, city=query, lat=geo["latitude"] if geo else None, lon=geo["longitude"] if geo else None, unit=unit)
 
             extension.cache[key] = (data,time.time())
             return self.render(data, extension, interface_mode)
@@ -191,10 +233,7 @@ class WeatherListener(EventListener):
         desc = data["current"]["desc"]
         forecast = data.get("forecast", [])
 
-        weather_emoji = {200:"⛈️",300:"🌦️",500:"🌧️",600:"❄️",700:"🌫️",800:"☀️",801:"🌤️",802:"⛅",803:"🌥️",804:"☁️"}
-        current_code = data["current"]["code"]
-        current_emoji = weather_emoji.get(current_code,"🌡️")
-
+        # Completo: 3 linhas, terceira linha menor
         if interface_mode=="complete":
             line1 = f"{city_name}, {country} {flag}"
             line2 = f"{temp}º, {desc}"
@@ -202,22 +241,23 @@ class WeatherListener(EventListener):
             if forecast:
                 tomorrow = forecast[0]
                 after = forecast[1] if len(forecast)>1 else None
-                line3_parts = []
+                parts = []
                 if tomorrow:
-                    line3_parts.append(f"Amanhã: {tomorrow['min']}º / {tomorrow['max']}º")
+                    parts.append(f"Amanhã: {tomorrow['min']}º / {tomorrow['max']}º")
                 if after:
-                    line3_parts.append(f"Depois: {after['min']}º / {after['max']}º")
-                line3 = " | ".join(line3_parts)
+                    parts.append(f"Depois: {after['min']}º / {after['max']}º")
+                line3 = " | ".join(parts)
             name = f"{line1}\n{line2}\n{line3}"
-
-            description = ""  # já mostra tudo no name
-
-        elif interface_mode=="essential":
-            line1 = f"{temp}º {current_emoji} {desc}"
-            line2 = f"{city_name}, {country} {flag}"
-            name = f"{line1}\n{line2}"
             description = ""
 
+        # Essencial: 2 linhas, sem bloco, sem emoji
+        elif interface_mode=="essential":
+            line1 = f"{temp}º {desc}"
+            line2 = f"{city_name}, {country} {flag}"
+            name = line1
+            description = line2
+
+        # Mínimo: 1 linha, fonte menor
         elif interface_mode=="minimal":
             name = f"{temp}º - {city_name} {flag}"
             description = ""
@@ -230,6 +270,7 @@ class WeatherListener(EventListener):
                 on_enter=None
             )
         ])
+
 
 if __name__=="__main__":
     UWeather().run()
