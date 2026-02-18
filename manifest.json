@@ -4,7 +4,7 @@
 
   "name": "UWeather",
   "display_name": "UWeather",
-  "description": "Fast and lightweight weather extension with smart caching, automatic location detection, multi-provider support and customizable display modes.",
+  "description": "Fast and lightweight weather extension with automatic location detection and customizable display.",
 
   "developer_name": "Xavier",
   "icon": "images/icon.png",
@@ -24,80 +24,11 @@
     },
 
     {
-      "id": "provider",
-      "type": "select",
-      "name": "Weather Provider",
-      "default_value": "openmeteo",
-      "options": [
-        { "text": "Open-Meteo (no API key required)", "value": "openmeteo" },
-        { "text": "OpenWeather (requires API key)", "value": "openweather" }
-      ]
-    },
-
-    {
       "id": "api_key",
       "type": "input",
       "name": "OpenWeather API Key",
-      "description": "Required only if OpenWeather is selected.",
+      "description": "Required to fetch weather data from OpenWeather.",
       "default_value": ""
-    },
-
-    {
-      "id": "unit",
-      "type": "select",
-      "name": "Temperature Unit",
-      "default_value": "metric",
-      "options": [
-        { "text": "Celsius (°C)", "value": "metric" },
-        { "text": "Fahrenheit (°F)", "value": "imperial" }
-      ]
-    },
-
-    {
-      "id": "location_mode",
-      "type": "select",
-      "name": "Location Mode",
-      "default_value": "auto",
-      "options": [
-        { "text": "Automatic", "value": "auto" },
-        { "text": "Manual", "value": "manual" }
-      ]
-    },
-
-    {
-      "id": "static_city",
-      "type": "input",
-      "name": "Manual City",
-      "description": "Used only when Location Mode is set to Manual.",
-      "default_value": ""
-    },
-
-    {
-      "id": "view_mode",
-      "type": "select",
-      "name": "Display Mode",
-      "default_value": "3",
-      "options": [
-        { "text": "Ultra Minimal", "value": "1" },
-        { "text": "Minimal", "value": "2" },
-        { "text": "Compact", "value": "3" },
-        { "text": "Full", "value": "4" },
-        { "text": "Detailed (current + forecast)", "value": "5" }
-      ]
-    },
-
-    {
-      "id": "language",
-      "type": "select",
-      "name": "Language",
-      "default_value": "en",
-      "options": [
-        { "text": "English", "value": "en" },
-        { "text": "Português", "value": "pt" },
-        { "text": "Español", "value": "es" },
-        { "text": "Français", "value": "fr" },
-        { "text": "Русский", "value": "ru" }
-      ]
     }
 
   ]
