@@ -8,10 +8,8 @@ from ulauncher.api.client.EventListener import EventListener
 from ulauncher.api.client.Extension import Extension
 from ulauncher.api.client.ActionThread import ActionThread
 from ulauncher.api.shared.event import KeywordQueryEvent
-from ulauncher.api.shared.item.ExtensionResultItem import ExtensionResultItem
-from ulauncher.api.shared.item.SmallResultItem import SmallResultItem
-from ulauncher.api.shared.action.RenderResultListAction import RenderResultListAction
-from ulauncher.api.shared.action.DoNothingAction import DoNothingAction
+from ulauncher.api.shared.item import ExtensionResultItem, SmallResultItem
+from ulauncher.api.shared.action import RenderResultListAction, DoNothingAction
 
 
 CACHE = {}
@@ -23,8 +21,9 @@ CACHE_TTL = 600
 # =========================
 
 def get_cache(key):
-    if key in CACHE and time.time() - CACHE[key]["time"] < CACHE_TTL:
-        return CACHE[key]["data"]
+    data = CACHE.get(key)
+    if data and time.time() - data["time"] < CACHE_TTL:
+        return data["data"]
     return None
 
 
@@ -56,10 +55,13 @@ def country_flag(code):
 
 def get_json(url):
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
         with urllib.request.urlopen(req, timeout=3) as response:
             return json.loads(response.read().decode())
-    except:
+    except Exception:
         return None
 
 
@@ -74,7 +76,7 @@ def get_ip_location():
 
     data = get_json("http://ip-api.com/json/")
     if data and data.get("status") == "success":
-        result = (data["lat"], data["lon"], data["city"])
+        result = (data.get("lat"), data.get("lon"), data.get("city"))
         set_cache("ip", result)
         return result
 
@@ -92,7 +94,11 @@ def geocode_city(query):
     if cached:
         return cached
 
-    url = f"https://geocoding-api.open-meteo.com/v1/search?name={urllib.parse.quote(query)}&count=7"
+    url = (
+        "https://geocoding-api.open-meteo.com/v1/search"
+        f"?name={urllib.parse.quote(query)}&count=7"
+    )
+
     data = get_json(url)
 
     if not data or not data.get("results"):
@@ -112,18 +118,22 @@ def get_weather(lat, lon, unit):
     temp_unit = "celsius" if unit == "metric" else "fahrenheit"
 
     url = (
-        f"https://api.open-meteo.com/v1/forecast?"
-        f"latitude={lat}&longitude={lon}"
-        f"&current_weather=true"
+        "https://api.open-meteo.com/v1/forecast"
+        f"?latitude={lat}&longitude={lon}"
+        "&current_weather=true"
         f"&temperature_unit={temp_unit}"
-        f"&timezone=auto"
+        "&timezone=auto"
     )
 
     data = get_json(url)
     if not data:
         return None
 
-    return data["current_weather"]["temperature"]
+    current = data.get("current_weather")
+    if not current:
+        return None
+
+    return current.get("temperature")
 
 
 # =========================
@@ -143,20 +153,20 @@ class WeatherHandler(EventListener):
         query = (event.get_argument() or "").strip()
         unit = extension.preferences.get("unit", "metric")
 
-        # 🔥 MOSTRAR 3 CIDADES PRÓXIMAS AO ABRIR
         if not query:
-            extension.run_thread(ActionThread(self.show_nearby, extension, unit))
+            extension.run_thread(
+                ActionThread(self.show_nearby, extension, unit)
+            )
 
             return RenderResultListAction([
                 SmallResultItem(
                     icon='images/icon.png',
                     name="Detectando cidades próximas...",
-                    description="Carregando...",
+                    description="Aguarde...",
                     on_enter=DoNothingAction()
                 )
             ])
 
-        # 🔥 AUTOCOMPLETE INTELIGENTE ENQUANTO DIGITA
         extension.run_thread(
             ActionThread(self.search_and_render, extension, query, unit)
         )
@@ -165,7 +175,7 @@ class WeatherHandler(EventListener):
             SmallResultItem(
                 icon='images/icon.png',
                 name=f"Buscando: {query}",
-                description="Digite mais para refinar...",
+                description="Digite mais para refinar a busca",
                 on_enter=DoNothingAction()
             )
         ])
@@ -177,12 +187,13 @@ class WeatherHandler(EventListener):
     def show_nearby(self, extension, unit):
 
         lat, lon, city_name = get_ip_location()
-        if not lat:
+
+        if lat is None:
             extension.set_results([
                 SmallResultItem(
                     icon='images/icon.png',
                     name="Erro de localização",
-                    description="Não foi possível detectar sua cidade",
+                    description="Não foi possível detectar sua cidade atual",
                     on_enter=DoNothingAction()
                 )
             ])
@@ -194,7 +205,12 @@ class WeatherHandler(EventListener):
 
         for city in cities[:3]:
 
-            temp = get_weather(city["latitude"], city["longitude"], unit)
+            temp = get_weather(
+                city["latitude"],
+                city["longitude"],
+                unit
+            )
+
             if temp is None:
                 continue
 
@@ -206,6 +222,16 @@ class WeatherHandler(EventListener):
                     icon='images/icon.png',
                     name=f"{flag} {city['name']} ({city['country_code']})",
                     description=f"{temp}{symbol}",
+                    on_enter=DoNothingAction()
+                )
+            )
+
+        if not items:
+            items.append(
+                SmallResultItem(
+                    icon='images/icon.png',
+                    name="Sem dados disponíveis",
+                    description="Não foi possível obter a previsão",
                     on_enter=DoNothingAction()
                 )
             )
@@ -226,33 +252,60 @@ class WeatherHandler(EventListener):
                 SmallResultItem(
                     icon='images/icon.png',
                     name="Cidade não encontrada",
-                    description="Digite uma cidade válida",
+                    description="Verifique a grafia e tente novamente",
                     on_enter=DoNothingAction()
                 )
             ])
             return
 
-        if user_lat:
-            cities.sort(key=lambda c:
-                distance(user_lat, user_lon, c["latitude"], c["longitude"])
+        if user_lat is not None:
+            cities.sort(
+                key=lambda c: distance(
+                    user_lat,
+                    user_lon,
+                    c["latitude"],
+                    c["longitude"]
+                )
             )
 
         items = []
 
         for city in cities[:5]:
 
-            temp = get_weather(city["latitude"], city["longitude"], unit)
+            temp = get_weather(
+                city["latitude"],
+                city["longitude"],
+                unit
+            )
+
             if temp is None:
                 continue
 
             flag = country_flag(city.get("country_code"))
             symbol = "°C" if unit == "metric" else "°F"
 
+            admin = city.get("admin1")
+            location_label = (
+                f"{city['name']} ({admin}) ({city['country_code']})"
+                if admin else
+                f"{city['name']} ({city['country_code']})"
+            )
+
             items.append(
                 ExtensionResultItem(
                     icon='images/icon.png',
-                    name=f"{flag} {city['name']} ({city.get('admin1','')}) ({city['country_code']})",
+                    name=f"{flag} {location_label}",
                     description=f"{temp}{symbol}",
+                    on_enter=DoNothingAction()
+                )
+            )
+
+        if not items:
+            items.append(
+                SmallResultItem(
+                    icon='images/icon.png',
+                    name="Sem dados disponíveis",
+                    description="Não foi possível obter a previsão",
                     on_enter=DoNothingAction()
                 )
             )
