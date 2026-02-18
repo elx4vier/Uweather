@@ -15,9 +15,6 @@ from ulauncher.api.shared.action.RenderResultListAction import RenderResultListA
 # =========================
 CACHE = {}
 CACHE_TTL = 600
-DEBOUNCE_DELAY = 0.4
-LAST_QUERY_TIME = 0
-LAST_ACTION = None  # Armazena a última ação para referência (não usado mais no debounce)
 
 # =========================
 # ⚡ CACHE
@@ -149,21 +146,6 @@ class UWeatherExtension(Extension):
 
 class WeatherHandler(EventListener):
     def on_event(self, event, extension):
-        global LAST_QUERY_TIME, LAST_ACTION
-        now = time.time()
-
-        # ✅ DEBOUNCE: sempre mostra "Buscando..." enquanto digita
-        if now - LAST_QUERY_TIME < DEBOUNCE_DELAY:
-            return RenderResultListAction([
-                SmallResultItem(
-                    icon='images/icon.png',
-                    name="Buscando...",
-                    description="Aguarde enquanto processamos sua consulta",
-                    on_enter=DoNothingAction()
-                )
-            ])
-
-        LAST_QUERY_TIME = now
         unit = extension.preferences.get("unit", "metric")
         query = event.get_argument()
 
@@ -173,7 +155,7 @@ class WeatherHandler(EventListener):
         if query:
             lat, lon, city, country = geocode_city(query)
             if not lat:
-                action = RenderResultListAction([
+                return RenderResultListAction([
                     SmallResultItem(
                         icon='images/icon.png',
                         name="Cidade não encontrada",
@@ -181,12 +163,10 @@ class WeatherHandler(EventListener):
                         on_enter=DoNothingAction()
                     )
                 ])
-                LAST_ACTION = action
-                return action
         else:
             lat, lon, city, country = get_ip_location()
             if not lat:
-                action = RenderResultListAction([
+                return RenderResultListAction([
                     SmallResultItem(
                         icon='images/icon.png',
                         name="Não foi possível encontrar sua localização",
@@ -194,15 +174,13 @@ class WeatherHandler(EventListener):
                         on_enter=DoNothingAction()
                     )
                 ])
-                LAST_ACTION = action
-                return action
 
         # =========================
         # 🌤 WEATHER
         # =========================
         weather = get_weather(lat, lon, unit)
         if not weather:
-            action = RenderResultListAction([
+            return RenderResultListAction([
                 SmallResultItem(
                     icon='images/icon.png',
                     name="Erro ao buscar clima",
@@ -210,8 +188,6 @@ class WeatherHandler(EventListener):
                     on_enter=DoNothingAction()
                 )
             ])
-            LAST_ACTION = action
-            return action
 
         symbol = "°C" if unit == "metric" else "°F"
         flag = country_flag(country)
@@ -226,7 +202,7 @@ class WeatherHandler(EventListener):
             f"Próximos dias: {' | '.join(weather['forecast'])}"
         )
 
-        action = RenderResultListAction([
+        return RenderResultListAction([
             ExtensionResultItem(
                 icon='images/icon.png',
                 name=f"{flag} {city}, {country}",
@@ -234,8 +210,6 @@ class WeatherHandler(EventListener):
                 on_enter=DoNothingAction()
             )
         ])
-        LAST_ACTION = action
-        return action
 
 if __name__ == "__main__":
     UWeatherExtension().run()
