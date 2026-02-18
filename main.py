@@ -15,7 +15,7 @@ from ulauncher.api.shared.item.ExtensionSmallResultItem import ExtensionSmallRes
 from ulauncher.api.shared.action.RenderResultListAction import RenderResultListAction
 
 logger = logging.getLogger(__name__)
-CACHE_TTL = 300  # 5 minutos
+CACHE_TTL = 600  # 10 minutos
 CACHE_FILE = "cache_weather.json"
 
 
@@ -67,6 +67,38 @@ def save_cache(base_path, cache_data):
 # ==============================
 # WEATHER SERVICE
 # ==============================
+OPEN_METEO_WEATHER_CODES = {
+    0: "céu limpo",
+    1: "parcialmente nublado",
+    2: "nublado",
+    3: "nublado",
+    45: "neblina",
+    48: "neblina com gelo",
+    51: "chuva fraca",
+    53: "chuva moderada",
+    55: "chuva forte",
+    56: "chuva congelante fraca",
+    57: "chuva congelante forte",
+    61: "chuva",
+    63: "chuva forte",
+    65: "chuva intensa",
+    66: "chuva congelante leve",
+    67: "chuva congelante intensa",
+    71: "neve fraca",
+    73: "neve moderada",
+    75: "neve intensa",
+    77: "granizo",
+    80: "chuva forte",
+    81: "chuva intensa",
+    82: "chuva intensa",
+    85: "neve leve",
+    86: "neve intensa",
+    95: "trovoada",
+    96: "trovoada com granizo",
+    99: "trovoada com granizo intenso"
+}
+
+
 class WeatherService:
 
     @staticmethod
@@ -78,7 +110,6 @@ class WeatherService:
                 return geo
         except Exception:
             pass
-
         try:
             r = session.get("http://ip-api.com/json/", timeout=5)
             geo = r.json()
@@ -90,8 +121,7 @@ class WeatherService:
             }
         except Exception:
             pass
-
-        raise Exception("Falha na localização")
+        raise Exception("Não foi possível obter sua localização atual")
 
     @staticmethod
     def fetch_weather_openweather(session, api_key, city=None, lat=None, lon=None, unit="c"):
@@ -130,26 +160,30 @@ class WeatherService:
             timeout=5
         )
         data = r.json()
-
         forecast_list = []
+
         daily = data.get("daily", {})
-        if "temperature_2m_max" in daily and "temperature_2m_min" in daily:
+        if "temperature_2m_max" in daily and "temperature_2m_min" in daily and "weathercode" in daily:
             for i in range(min(2, len(daily["temperature_2m_max"]))):
                 forecast_list.append({
                     "max": int(daily["temperature_2m_max"][i]),
                     "min": int(daily["temperature_2m_min"][i]),
-                    "code": daily["weathercode"][i]
+                    "code": daily["weathercode"][i],
+                    "desc": OPEN_METEO_WEATHER_CODES.get(daily["weathercode"][i], "desconhecido")
                 })
 
         current = data.get("current_weather", {})
+        code = current.get("weathercode", 0)
+        desc = OPEN_METEO_WEATHER_CODES.get(code, "desconhecido")
+
         return {
             "city": f"{city_name}, {country}",
             "city_name": city_name,
             "country": country,
             "current": {
                 "temp": int(current.get("temperature", 0)),
-                "code": current.get("weathercode", 0),
-                "desc": "desconhecido"  # manterá minúsculo
+                "code": code,
+                "desc": desc
             },
             "forecast": forecast_list
         }
@@ -163,13 +197,12 @@ class WeatherService:
             temp_max = item["main"]["temp_max"]
             temp_min = item["main"]["temp_min"]
             code = item["weather"][0]["id"]
-            desc = item["weather"][0]["description"].lower()  # condição em minúsculo
+            desc = item["weather"][0]["description"].lower()
             if date not in daily:
                 daily[date] = {"max": temp_max, "min": temp_min, "code": code, "desc": desc}
             else:
                 daily[date]["max"] = max(daily[date]["max"], temp_max)
                 daily[date]["min"] = min(daily[date]["min"], temp_min)
-
         sorted_dates = sorted(daily.keys())
         forecast = []
         for date in sorted_dates[1:3]:
@@ -178,15 +211,14 @@ class WeatherService:
                 "min": int(daily[date]["min"]),
                 "code": daily[date]["code"]
             })
-
         return {
             "city": f"{data['city']['name']}, {data['city']['country']}",
             "city_name": data['city']['name'],
             "country": data['city']['country'],
             "current": {
                 "temp": int(current["main"]["temp"]),
-                "code": current["weather"][0]["id"],
-                "desc": current["weather"][0]["description"].lower()  # condição em minúsculo
+                "code": data["list"][0]["weather"][0]["id"],
+                "desc": data["list"][0]["weather"][0]["description"].lower()
             },
             "forecast": forecast
         }
@@ -196,14 +228,12 @@ class WeatherService:
 # EXTENSION
 # ==============================
 class UWeather(Extension):
-
     def __init__(self):
         super().__init__()
         self.subscribe(KeywordQueryEvent, WeatherListener())
         self.session = create_session()
         self.base_path = os.path.dirname(os.path.abspath(__file__))
         self.icon_default = os.path.join(self.base_path, "images", "icon.png")
-        # Carregar cache do arquivo
         self.cache = load_cache(self.base_path)
         threading.Thread(target=self.preload_weather, daemon=True).start()
 
@@ -230,10 +260,9 @@ class UWeather(Extension):
 
 
 # ==============================
-# LISTENER COM CACHE EM ARQUIVO
+# LISTENER
 # ==============================
 class WeatherListener(EventListener):
-
     def on_event(self, event, extension):
         try:
             provider = (extension.preferences.get("provider") or "openweather").lower()
@@ -247,17 +276,28 @@ class WeatherListener(EventListener):
             geo = None
             key = None
 
+            # Limpar cache se unidade mudou
+            unit_cached = extension.cache.get("_unit", "c")
+            if unit != unit_cached:
+                extension.cache = {}
+                extension.cache["_unit"] = unit
+                save_cache(extension.base_path, extension.cache)
+
             # Determinar chave e localização
             if not query and location_mode == "auto":
                 key = "auto"
                 if key in extension.cache:
                     entry = extension.cache[key]
                     data, ts = entry["data"], entry["ts"]
-                    return self.render(data, extension, interface_mode)
+                    if time.time() - ts < CACHE_TTL:
+                        return self.render(data, extension, interface_mode)
                 try:
                     geo = WeatherService.fetch_location(extension.session)
                 except Exception:
                     # Sem internet e sem cache
+                    if "auto" in extension.cache:
+                        data = extension.cache["auto"]["data"]
+                        return self.render(data, extension, interface_mode)
                     return RenderResultListAction([
                         ExtensionResultItem(
                             icon=extension.icon("error.png"),
@@ -298,6 +338,16 @@ class WeatherListener(EventListener):
                     )
             except Exception as e:
                 msg = str(e).lower()
+                # API key inválida sempre independente
+                if "api key" in msg or "invalid api key" in msg:
+                    return RenderResultListAction([
+                        ExtensionResultItem(
+                            icon=extension.icon("error.png"),
+                            name="API key inválida",
+                            on_enter=None
+                        )
+                    ])
+                # Cidade não encontrada
                 if "cidade não encontrada" in msg or "city not found" in msg:
                     return RenderResultListAction([
                         ExtensionResultItem(
@@ -306,26 +356,19 @@ class WeatherListener(EventListener):
                             on_enter=None
                         )
                     ])
-                elif "api key" in msg or "invalid api key" in msg:
-                    return RenderResultListAction([
-                        ExtensionResultItem(
-                            icon=extension.icon("error.png"),
-                            name="API key inválida",
-                            on_enter=None
-                        )
-                    ])
-                else:
-                    return RenderResultListAction([
-                        ExtensionResultItem(
-                            icon=extension.icon("error.png"),
-                            name="Erro ao obter clima",
-                            on_enter=None
-                        )
-                    ])
+                # Qualquer outro erro
+                return RenderResultListAction([
+                    ExtensionResultItem(
+                        icon=extension.icon("error.png"),
+                        name="Erro ao obter clima",
+                        on_enter=None
+                    )
+                ])
 
             # Atualizar cache
             extension.cache[key] = {"data": data, "ts": time.time()}
             save_cache(extension.base_path, extension.cache)
+
             return self.render(data, extension, interface_mode)
 
         except Exception:
