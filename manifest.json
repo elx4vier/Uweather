@@ -4,7 +4,7 @@
 
   "name": "UWeather",
   "display_name": "UWeather",
-  "description": "Current weather and 3-day forecast with smart cache, automatic translation and multi-provider support.",
+  "description": "Fast and lightweight weather extension with smart caching, automatic location detection, multi-provider support and customizable display modes.",
 
   "developer_name": "Xavier",
   "icon": "images/icon.png",
@@ -27,10 +27,10 @@
       "id": "provider",
       "type": "select",
       "name": "Weather Provider",
-      "default_value": "openweather",
+      "default_value": "openmeteo",
       "options": [
-        { "text": "OpenWeather (requires API key)", "value": "openweather" },
-        { "text": "Open-Meteo (no API key required)", "value": "openmeteo" }
+        { "text": "Open-Meteo (no API key required)", "value": "openmeteo" },
+        { "text": "OpenWeather (requires API key)", "value": "openweather" }
       ]
     },
 
@@ -38,7 +38,7 @@
       "id": "api_key",
       "type": "input",
       "name": "OpenWeather API Key",
-      "description": "Get your free API key at https://openweathermap.org → Sign up → API keys.",
+      "description": "Required only if OpenWeather is selected.",
       "default_value": ""
     },
 
@@ -68,7 +68,7 @@
       "id": "static_city",
       "type": "input",
       "name": "Manual City",
-      "description": "Enter the city name (used only when Location Mode is set to Manual).",
+      "description": "Used only when Location Mode is set to Manual.",
       "default_value": ""
     },
 
@@ -76,8 +76,7 @@
       "id": "view_mode",
       "type": "select",
       "name": "Display Mode",
-      "description": "Choose how detailed the weather information should appear.",
-      "default_value": "5",
+      "default_value": "3",
       "options": [
         { "text": "Ultra Minimal", "value": "1" },
         { "text": "Minimal", "value": "2" },
@@ -91,14 +90,13 @@
       "id": "language",
       "type": "select",
       "name": "Language",
-      "description": "Select the interface language of the extension.",
       "default_value": "en",
       "options": [
         { "text": "English", "value": "en" },
         { "text": "Português", "value": "pt" },
         { "text": "Español", "value": "es" },
-        { "text": "Русский", "value": "ru" },
-        { "text": "Français", "value": "fr" }
+        { "text": "Français", "value": "fr" },
+        { "text": "Русский", "value": "ru" }
       ]
     }
 
