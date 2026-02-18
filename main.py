@@ -8,12 +8,16 @@ from ulauncher.api.client.EventListener import EventListener
 from ulauncher.api.client.Extension import Extension
 from ulauncher.api.client.ActionThread import ActionThread
 from ulauncher.api.shared.event import KeywordQueryEvent
-from ulauncher.api.shared.item import ExtensionResultItem, SmallResultItem
-from ulauncher.api.shared.action import RenderResultListAction, DoNothingAction
+
+from ulauncher.api.shared.item.ExtensionResultItem import ExtensionResultItem
+from ulauncher.api.shared.item.SmallResultItem import SmallResultItem
+from ulauncher.api.shared.action.RenderResultListAction import RenderResultListAction
+from ulauncher.api.shared.action.DoNothingAction import DoNothingAction
 
 
 CACHE = {}
 CACHE_TTL = 600
+EARTH_RADIUS_KM = 6371
 
 
 # =========================
@@ -21,9 +25,9 @@ CACHE_TTL = 600
 # =========================
 
 def get_cache(key):
-    data = CACHE.get(key)
-    if data and time.time() - data["time"] < CACHE_TTL:
-        return data["data"]
+    entry = CACHE.get(key)
+    if entry and time.time() - entry["time"] < CACHE_TTL:
+        return entry["data"]
     return None
 
 
@@ -32,15 +36,28 @@ def set_cache(key, data):
 
 
 # =========================
-# DISTÂNCIA
+# HAVERSINE
 # =========================
 
-def distance(lat1, lon1, lat2, lon2):
-    return math.sqrt((lat1 - lat2) ** 2 + (lon1 - lon2) ** 2)
+def haversine(lat1, lon1, lat2, lon2):
+    try:
+        lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+        dlat = lat2 - lat1
+        dlon = lon2 - lon1
+        a = (
+            math.sin(dlat / 2) ** 2 +
+            math.cos(lat1) *
+            math.cos(lat2) *
+            math.sin(dlon / 2) ** 2
+        )
+        c = 2 * math.asin(math.sqrt(a))
+        return EARTH_RADIUS_KM * c
+    except Exception:
+        return 999999
 
 
 # =========================
-# BANDEIRA
+# FLAG
 # =========================
 
 def country_flag(code):
@@ -50,7 +67,7 @@ def country_flag(code):
 
 
 # =========================
-# REQUEST
+# HTTP REQUEST
 # =========================
 
 def get_json(url):
@@ -66,7 +83,7 @@ def get_json(url):
 
 
 # =========================
-# LOCALIZAÇÃO DO USUÁRIO
+# IP LOCATION
 # =========================
 
 def get_ip_location():
@@ -88,32 +105,36 @@ def get_ip_location():
 # =========================
 
 def geocode_city(query):
-
-    cache_key = f"geo-{query.lower()}"
-    cached = get_cache(cache_key)
+    key = f"geo-{query.lower()}"
+    cached = get_cache(key)
     if cached:
         return cached
 
     url = (
         "https://geocoding-api.open-meteo.com/v1/search"
-        f"?name={urllib.parse.quote(query)}&count=7"
+        f"?name={urllib.parse.quote(query)}&count=5"
     )
 
     data = get_json(url)
+    results = data.get("results") if data else None
 
-    if not data or not data.get("results"):
+    if not results:
         return []
 
-    results = data["results"]
-    set_cache(cache_key, results)
+    set_cache(key, results)
     return results
 
 
 # =========================
-# WEATHER
+# WEATHER (Open-Meteo)
 # =========================
 
 def get_weather(lat, lon, unit):
+
+    key = f"weather-{lat}-{lon}-{unit}"
+    cached = get_cache(key)
+    if cached:
+        return cached
 
     temp_unit = "celsius" if unit == "metric" else "fahrenheit"
 
@@ -133,7 +154,12 @@ def get_weather(lat, lon, unit):
     if not current:
         return None
 
-    return current.get("temperature")
+    temp = current.get("temperature")
+
+    if temp is not None:
+        set_cache(key, temp)
+
+    return temp
 
 
 # =========================
@@ -152,167 +178,173 @@ class WeatherHandler(EventListener):
 
         query = (event.get_argument() or "").strip()
         unit = extension.preferences.get("unit", "metric")
+        symbol = "°C" if unit == "metric" else "°F"
 
         if not query:
             extension.run_thread(
-                ActionThread(self.show_nearby, extension, unit)
+                ActionThread(self.show_nearby, extension, unit, symbol)
             )
 
             return RenderResultListAction([
                 SmallResultItem(
                     icon='images/icon.png',
-                    name="Detectando cidades próximas...",
+                    name="Detectando sua cidade...",
                     description="Aguarde...",
                     on_enter=DoNothingAction()
                 )
             ])
 
         extension.run_thread(
-            ActionThread(self.search_and_render, extension, query, unit)
+            ActionThread(
+                self.search_and_render,
+                extension,
+                query,
+                unit,
+                symbol
+            )
         )
 
         return RenderResultListAction([
             SmallResultItem(
                 icon='images/icon.png',
                 name=f"Buscando: {query}",
-                description="Digite mais para refinar a busca",
+                description="Refinando resultados...",
                 on_enter=DoNothingAction()
             )
         ])
 
     # =========================
-    # MOSTRAR PRÓXIMAS
-    # =========================
 
-    def show_nearby(self, extension, unit):
+    def show_nearby(self, extension, unit, symbol):
+        try:
+            lat, lon, city_name = get_ip_location()
 
-        lat, lon, city_name = get_ip_location()
+            if lat is None:
+                extension.set_results([
+                    SmallResultItem(
+                        icon='images/icon.png',
+                        name="Erro de localização",
+                        description="Não foi possível detectar sua cidade",
+                        on_enter=DoNothingAction()
+                    )
+                ])
+                return
 
-        if lat is None:
-            extension.set_results([
-                SmallResultItem(
-                    icon='images/icon.png',
-                    name="Erro de localização",
-                    description="Não foi possível detectar sua cidade atual",
-                    on_enter=DoNothingAction()
+            cities = geocode_city(city_name)
+            items = []
+
+            for city in cities[:3]:
+
+                temp = get_weather(
+                    city["latitude"],
+                    city["longitude"],
+                    unit
                 )
-            ])
-            return
 
-        cities = geocode_city(city_name)
+                if temp is None:
+                    continue
 
-        items = []
+                flag = country_flag(city.get("country_code"))
 
-        for city in cities[:3]:
-
-            temp = get_weather(
-                city["latitude"],
-                city["longitude"],
-                unit
-            )
-
-            if temp is None:
-                continue
-
-            flag = country_flag(city.get("country_code"))
-            symbol = "°C" if unit == "metric" else "°F"
-
-            items.append(
-                ExtensionResultItem(
-                    icon='images/icon.png',
-                    name=f"{flag} {city['name']} ({city['country_code']})",
-                    description=f"{temp}{symbol}",
-                    on_enter=DoNothingAction()
+                items.append(
+                    ExtensionResultItem(
+                        icon='images/icon.png',
+                        name=f"{flag} {city['name']} ({city['country_code']})",
+                        description=f"{temp}{symbol}",
+                        on_enter=DoNothingAction()
+                    )
                 )
-            )
 
-        if not items:
-            items.append(
+            extension.set_results(items or [
                 SmallResultItem(
                     icon='images/icon.png',
                     name="Sem dados disponíveis",
-                    description="Não foi possível obter a previsão",
-                    on_enter=DoNothingAction()
-                )
-            )
-
-        extension.set_results(items)
-
-    # =========================
-    # BUSCA INTELIGENTE
-    # =========================
-
-    def search_and_render(self, extension, query, unit):
-
-        user_lat, user_lon, _ = get_ip_location()
-        cities = geocode_city(query)
-
-        if not cities:
-            extension.set_results([
-                SmallResultItem(
-                    icon='images/icon.png',
-                    name="Cidade não encontrada",
-                    description="Verifique a grafia e tente novamente",
+                    description="Não foi possível obter previsão",
                     on_enter=DoNothingAction()
                 )
             ])
-            return
 
-        if user_lat is not None:
-            cities.sort(
-                key=lambda c: distance(
-                    user_lat,
-                    user_lon,
-                    c["latitude"],
-                    c["longitude"]
-                )
-            )
-
-        items = []
-
-        for city in cities[:5]:
-
-            temp = get_weather(
-                city["latitude"],
-                city["longitude"],
-                unit
-            )
-
-            if temp is None:
-                continue
-
-            flag = country_flag(city.get("country_code"))
-            symbol = "°C" if unit == "metric" else "°F"
-
-            admin = city.get("admin1")
-            location_label = (
-                f"{city['name']} ({admin}) ({city['country_code']})"
-                if admin else
-                f"{city['name']} ({city['country_code']})"
-            )
-
-            items.append(
-                ExtensionResultItem(
-                    icon='images/icon.png',
-                    name=f"{flag} {location_label}",
-                    description=f"{temp}{symbol}",
-                    on_enter=DoNothingAction()
-                )
-            )
-
-        if not items:
-            items.append(
+        except Exception as e:
+            extension.set_results([
                 SmallResultItem(
                     icon='images/icon.png',
-                    name="Sem dados disponíveis",
-                    description="Não foi possível obter a previsão",
+                    name="Erro interno",
+                    description=str(e),
                     on_enter=DoNothingAction()
                 )
-            )
+            ])
 
-        extension.set_results(items)
+    # =========================
+
+    def search_and_render(self, extension, query, unit, symbol):
+        try:
+            user_lat, user_lon, _ = get_ip_location()
+            cities = geocode_city(query)
+
+            if not cities:
+                extension.set_results([
+                    SmallResultItem(
+                        icon='images/icon.png',
+                        name="Cidade não encontrada",
+                        description="Verifique a grafia",
+                        on_enter=DoNothingAction()
+                    )
+                ])
+                return
+
+            if user_lat is not None:
+                cities.sort(
+                    key=lambda c: haversine(
+                        user_lat,
+                        user_lon,
+                        c["latitude"],
+                        c["longitude"]
+                    )
+                )
+
+            items = []
+
+            for city in cities:
+
+                temp = get_weather(
+                    city["latitude"],
+                    city["longitude"],
+                    unit
+                )
+
+                if temp is None:
+                    continue
+
+                flag = country_flag(city.get("country_code"))
+                admin = city.get("admin1")
+
+                label = (
+                    f"{city['name']} ({admin}) ({city['country_code']})"
+                    if admin else
+                    f"{city['name']} ({city['country_code']})"
+                )
+
+                items.append(
+                    ExtensionResultItem(
+                        icon='images/icon.png',
+                        name=f"{flag} {label}",
+                        description=f"{temp}{symbol}",
+                        on_enter=DoNothingAction()
+                    )
+                )
+
+            extension.set_results(items)
+
+        except Exception as e:
+            extension.set_results([
+                SmallResultItem(
+                    icon='images/icon.png',
+                    name="Erro interno",
+                    description=str(e),
+                    on_enter=DoNothingAction()
+                )
+            ])
 
 
 if __name__ == "__main__":
     UWeatherExtension().run()
-    
