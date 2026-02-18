@@ -4,7 +4,7 @@
 
   "name": "UWeather",
   "display_name": "UWeather",
-  "description": "Fast and lightweight weather extension with smart caching, automatic location detection, multi-provider support and customizable display modes.",
+  "description": "Fast and lightweight weather extension with smart caching, automatic location detection, multi-provider support, customizable display modes, and configurable icons.",
 
   "developer_name": "Xavier",
   "icon": "images/icon.png",
@@ -27,10 +27,10 @@
       "id": "provider",
       "type": "select",
       "name": "Weather Provider",
-      "default_value": "openmeteo",
+      "default_value": "openweather",
       "options": [
-        { "text": "Open-Meteo (no API key required)", "value": "openmeteo" },
-        { "text": "OpenWeather (requires API key)", "value": "openweather" }
+        { "text": "OpenWeather (requires API key)", "value": "openweather" },
+        { "text": "Open-Meteo (no API key required)", "value": "openmeteo" }
       ]
     },
 
@@ -90,7 +90,7 @@
       "id": "language",
       "type": "select",
       "name": "Language",
-      "default_value": "en",
+      "default_value": "pt",
       "options": [
         { "text": "English", "value": "en" },
         { "text": "Português", "value": "pt" },
@@ -98,6 +98,46 @@
         { "text": "Français", "value": "fr" },
         { "text": "Русский", "value": "ru" }
       ]
+    },
+
+    {
+      "id": "icon_default",
+      "type": "file",
+      "name": "Default Icon",
+      "description": "Icon used for normal display and default state.",
+      "default_value": "images/icon.png"
+    },
+
+    {
+      "id": "icon_error",
+      "type": "file",
+      "name": "Error Icon",
+      "description": "Icon used when an error occurs while fetching weather.",
+      "default_value": "images/error.png"
+    },
+
+    {
+      "id": "icon_loading",
+      "type": "file",
+      "name": "Loading Icon",
+      "description": "Icon shown while fetching weather data.",
+      "default_value": "images/loading.png"
+    },
+
+    {
+      "id": "icon_alert",
+      "type": "file",
+      "name": "Alert Icon",
+      "description": "Icon used for warnings or alerts.",
+      "default_value": "images/alert.png"
+    },
+
+    {
+      "id": "cache_ttl",
+      "type": "int",
+      "name": "Cache TTL (seconds)",
+      "description": "Time the weather data stays in cache before refreshing.",
+      "default_value": 300
     }
 
   ]
