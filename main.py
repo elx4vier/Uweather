@@ -17,7 +17,7 @@ from ulauncher.api.shared.action.RenderResultListAction import RenderResultListA
 # =========================
 
 CACHE = {}
-CACHE_TTL = 600
+CACHE_TTL = 600  # 10 minutos
 
 
 def get_cache(key):
@@ -40,7 +40,7 @@ WMO = {
     2: "Partly cloudy",
     3: "Overcast",
     45: "Fog",
-    48: "Depositing rime fog",
+    48: "Rime fog",
     51: "Light drizzle",
     53: "Drizzle",
     55: "Heavy drizzle",
@@ -58,37 +58,63 @@ WMO = {
 
 
 # =========================
-# 🌐 REQUEST
+# 🌐 SAFE REQUEST (3s timeout)
 # =========================
 
 def get_json(url):
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=6) as response:
+        with urllib.request.urlopen(req, timeout=3) as response:
             return json.loads(response.read().decode())
     except:
         return None
 
 
 # =========================
-# 📍 GEOLOCATION
+# 📍 GEOLOCATION (COM CACHE)
 # =========================
 
 def geocode_city(city):
+
+    cache_key = f"geo-{city.lower()}"
+    cached = get_cache(cache_key)
+    if cached:
+        return cached
+
     url = f"https://geocoding-api.open-meteo.com/v1/search?name={urllib.parse.quote(city)}&count=1"
     data = get_json(url)
 
     if data and data.get("results"):
         r = data["results"][0]
-        return r["latitude"], r["longitude"], r["name"], r.get("country_code", "")
+        result = (
+            r["latitude"],
+            r["longitude"],
+            r["name"],
+            r.get("country_code", "")
+        )
+        set_cache(cache_key, result)
+        return result
 
     return None, None, None, None
 
 
 def get_ip_location():
+
+    cached = get_cache("ip-location")
+    if cached:
+        return cached
+
     data = get_json("http://ip-api.com/json/")
     if data and data.get("status") == "success":
-        return data["lat"], data["lon"], data["city"], data["countryCode"]
+        result = (
+            data["lat"],
+            data["lon"],
+            data["city"],
+            data["countryCode"]
+        )
+        set_cache("ip-location", result)
+        return result
+
     return None, None, None, None
 
 
@@ -188,10 +214,7 @@ class WeatherHandler(EventListener):
 
         query = event.get_argument()
 
-        # =========================
         # 📍 DEFINE LOCALIZAÇÃO
-        # =========================
-
         if query:
             lat, lon, city, country = geocode_city(query)
             if not lat:
@@ -217,15 +240,11 @@ class WeatherHandler(EventListener):
 
         location_name = f"{city}, {country}" if country else city
 
-        # =========================
-        # ☁ BUSCAR CLIMA
-        # =========================
-
+        # ☁ BUSCAR CLIMA (COM CACHE)
         cache_key = f"{provider}-{lat}-{lon}-{unit}"
         weather = get_cache(cache_key)
 
         if not weather:
-
             if provider == "openweather":
                 if not api_key:
                     return RenderResultListAction([
@@ -254,7 +273,6 @@ class WeatherHandler(EventListener):
             ])
 
         symbol = "°C" if unit == "metric" else "°F"
-
         forecast = " | ".join(f"{f['temp']}" for f in weather["forecast"])
 
         desc = (
