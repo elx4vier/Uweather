@@ -2,12 +2,14 @@ import json
 import urllib.request
 import urllib.parse
 import time
+
 from ulauncher.api.client.EventListener import EventListener
 from ulauncher.api.client.Extension import Extension
 from ulauncher.api.shared.event import KeywordQueryEvent
 from ulauncher.api.shared.item.ExtensionResultItem import ExtensionResultItem
 from ulauncher.api.shared.item.SmallResultItem import SmallResultItem
 from ulauncher.api.shared.action.DoNothingAction import DoNothingAction
+from ulauncher.api.shared.action.RenderResultListAction import RenderResultListAction
 
 
 # =========================
@@ -15,7 +17,7 @@ from ulauncher.api.shared.action.DoNothingAction import DoNothingAction
 # =========================
 
 CACHE = {}
-CACHE_TTL = 600  # 10 minutes
+CACHE_TTL = 600  # 10 minutos
 
 
 def get_cache(key):
@@ -50,34 +52,10 @@ TEXTS = {
 # =========================
 
 WMO_TRANSLATIONS = {
-    0: {
-        "en": "Clear sky",
-        "pt": "Céu limpo",
-        "es": "Cielo despejado",
-        "fr": "Ciel dégagé",
-        "ru": "Ясно"
-    },
-    1: {
-        "en": "Mainly clear",
-        "pt": "Principalmente limpo",
-        "es": "Mayormente despejado",
-        "fr": "Principalement clair",
-        "ru": "Преимущественно ясно"
-    },
-    2: {
-        "en": "Partly cloudy",
-        "pt": "Parcialmente nublado",
-        "es": "Parcialmente nublado",
-        "fr": "Partiellement nuageux",
-        "ru": "Переменная облачность"
-    },
-    3: {
-        "en": "Overcast",
-        "pt": "Encoberto",
-        "es": "Cubierto",
-        "fr": "Couvert",
-        "ru": "Пасмурно"
-    }
+    0: {"en": "Clear sky", "pt": "Céu limpo", "es": "Cielo despejado", "fr": "Ciel dégagé", "ru": "Ясно"},
+    1: {"en": "Mainly clear", "pt": "Principalmente limpo", "es": "Mayormente despejado", "fr": "Principalement clair", "ru": "Преимущественно ясно"},
+    2: {"en": "Partly cloudy", "pt": "Parcialmente nublado", "es": "Parcialmente nublado", "fr": "Partiellement nuageux", "ru": "Переменная облачность"},
+    3: {"en": "Overcast", "pt": "Encoberto", "es": "Cubierto", "fr": "Couvert", "ru": "Пасмурно"}
 }
 
 
@@ -115,10 +93,13 @@ def geocode_city(city):
 
 
 # =========================
-# ☁ OPENWEATHER (WITH LANG)
+# ☁ OPENWEATHER
 # =========================
 
 def get_openweather(lat, lon, unit, api_key, lang):
+
+    if not api_key:
+        return "missing_key"
 
     units = "metric" if unit == "metric" else "imperial"
 
@@ -150,7 +131,7 @@ def get_openweather(lat, lon, unit, api_key, lang):
 
 
 # =========================
-# 🌤 OPEN-METEO (WITH WMO)
+# 🌤 OPEN-METEO
 # =========================
 
 def get_open_meteo(lat, lon, unit, lang):
@@ -223,20 +204,31 @@ class WeatherHandler(EventListener):
             lat, lon, city = get_ip_location()
 
         if not lat:
-            return SmallResultItem(
-                icon='images/icon.png',
-                name="Location failed",
-                description="",
-                on_enter=DoNothingAction()
-            )
+            return RenderResultListAction([
+                SmallResultItem(
+                    icon='images/icon.png',
+                    name="Location failed",
+                    description="Could not detect your location",
+                    on_enter=DoNothingAction()
+                )
+            ])
 
         cache_key = f"{provider}-{lat}-{lon}-{unit}-{lang}"
-        cached = get_cache(cache_key)
-        if cached:
-            weather = cached
-        else:
+        weather = get_cache(cache_key)
+
+        if not weather:
             if provider == "openweather":
                 weather = get_openweather(lat, lon, unit, api_key, lang)
+
+                if weather == "missing_key":
+                    return RenderResultListAction([
+                        SmallResultItem(
+                            icon='images/icon.png',
+                            name="Missing OpenWeather API key",
+                            description="Add your API key in extension settings",
+                            on_enter=DoNothingAction()
+                        )
+                    ])
             else:
                 weather = get_open_meteo(lat, lon, unit, lang)
 
@@ -244,12 +236,14 @@ class WeatherHandler(EventListener):
                 set_cache(cache_key, weather)
 
         if not weather:
-            return SmallResultItem(
-                icon='images/icon.png',
-                name="Weather error",
-                description="",
-                on_enter=DoNothingAction()
-            )
+            return RenderResultListAction([
+                SmallResultItem(
+                    icon='images/icon.png',
+                    name="Weather error",
+                    description="Could not fetch weather data",
+                    on_enter=DoNothingAction()
+                )
+            ])
 
         symbol = "°C" if unit == "metric" else "°F"
 
@@ -270,12 +264,14 @@ class WeatherHandler(EventListener):
             forecast = " | ".join(f"{f['temp']}{symbol}" for f in weather["forecast"])
             desc = f"{T['current']}: {weather['current_temp']}{symbol} - {weather['current_desc']}\n{T['forecast']}: {forecast}"
 
-        return ExtensionResultItem(
-            icon='images/icon.png',
-            name=f"📍 {city}",
-            description=desc,
-            on_enter=DoNothingAction()
-        )
+        return RenderResultListAction([
+            ExtensionResultItem(
+                icon='images/icon.png',
+                name=f"📍 {city}",
+                description=desc,
+                on_enter=DoNothingAction()
+            )
+        ])
 
 
 if __name__ == "__main__":
