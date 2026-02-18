@@ -1,282 +1,243 @@
-import json
-import urllib.request
-import urllib.parse
+import logging
+import requests
 import time
-from ulauncher.api.client.EventListener import EventListener
+import os
+import threading
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
 from ulauncher.api.client.Extension import Extension
+from ulauncher.api.client.EventListener import EventListener
 from ulauncher.api.shared.event import KeywordQueryEvent
 from ulauncher.api.shared.item.ExtensionResultItem import ExtensionResultItem
-from ulauncher.api.shared.item.SmallResultItem import SmallResultItem
-from ulauncher.api.shared.action.DoNothingAction import DoNothingAction
+from ulauncher.api.shared.action.RenderResultListAction import RenderResultListAction
+
+logger = logging.getLogger(__name__)
+CACHE_TTL = 300
 
 
-# =========================
-# ⚡ CACHE SYSTEM
-# =========================
-
-CACHE = {}
-CACHE_TTL = 600  # 10 minutes
-
-
-def get_cache(key):
-    if key in CACHE:
-        if time.time() - CACHE[key]["time"] < CACHE_TTL:
-            return CACHE[key]["data"]
-    return None
+# ==============================
+# SESSION
+# ==============================
+def create_session():
+    session = requests.Session()
+    retries = Retry(total=2, backoff_factor=0.3,
+                    status_forcelist=[500, 502, 503, 504])
+    adapter = HTTPAdapter(max_retries=retries)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
 
 
-def set_cache(key, data):
-    CACHE[key] = {
-        "time": time.time(),
-        "data": data
-    }
+# ==============================
+# WEATHER SERVICE
+# ==============================
+class WeatherService:
+
+    @staticmethod
+    def fetch_location(session):
+        try:
+            r = session.get("https://ipapi.co/json/", timeout=5)
+            geo = r.json()
+            if "latitude" in geo:
+                return geo
+        except:
+            pass
+
+        try:
+            r = session.get("http://ip-api.com/json/", timeout=5)
+            geo = r.json()
+            return {
+                "latitude": geo["lat"],
+                "longitude": geo["lon"],
+                "city": geo.get("city", "Desconhecida")
+            }
+        except:
+            pass
+
+        raise Exception("Falha na localização")
+
+    @staticmethod
+    def fetch_weather(session, api_key, city=None, lat=None, lon=None):
+        if city:
+            url = f"https://api.openweathermap.org/data/2.5/forecast?q={city}&appid={api_key}&units=metric&lang=pt_br"
+        else:
+            url = f"https://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={api_key}&units=metric&lang=pt_br"
+
+        r = session.get(url, timeout=5)
+        data = r.json()
+
+        if r.status_code != 200 or data.get("cod") != "200":
+            raise Exception("Cidade não encontrada")
+
+        return WeatherService.parse_weather(data)
+
+    @staticmethod
+    def parse_weather(data):
+        current = data["list"][0]
+        daily = {}
+
+        for item in data["list"]:
+            date = item["dt_txt"].split(" ")[0]
+            temp_max = item["main"]["temp_max"]
+            temp_min = item["main"]["temp_min"]
+            code = item["weather"][0]["id"]
+
+            if date not in daily:
+                daily[date] = {"max": temp_max, "min": temp_min, "code": code}
+            else:
+                daily[date]["max"] = max(daily[date]["max"], temp_max)
+                daily[date]["min"] = min(daily[date]["min"], temp_min)
+
+        sorted_dates = sorted(daily.keys())
+        forecast = []
+
+        for date in sorted_dates[1:3]:
+            forecast.append({
+                "max": int(daily[date]["max"]),
+                "min": int(daily[date]["min"]),
+                "code": daily[date]["code"]
+            })
+
+        return {
+            "city": f"{data['city']['name']}, {data['city']['country']}",
+            "current": {
+                "temp": int(current["main"]["temp"]),
+                "code": current["weather"][0]["id"]
+            },
+            "forecast": forecast
+        }
 
 
-# =========================
-# 🌍 INTERFACE TEXTS
-# =========================
+# ==============================
+# EXTENSION
+# ==============================
+class UWeather(Extension):
 
-TEXTS = {
-    "en": {"current": "Current weather", "forecast": "Forecast"},
-    "pt": {"current": "Clima atual", "forecast": "Previsão"},
-    "es": {"current": "Clima actual", "forecast": "Pronóstico"},
-    "fr": {"current": "Météo actuelle", "forecast": "Prévision"},
-    "ru": {"current": "Текущая погода", "forecast": "Прогноз"}
-}
-
-
-# =========================
-# 🌤 WMO TRANSLATIONS
-# =========================
-
-WMO_TRANSLATIONS = {
-    0: {
-        "en": "Clear sky",
-        "pt": "Céu limpo",
-        "es": "Cielo despejado",
-        "fr": "Ciel dégagé",
-        "ru": "Ясно"
-    },
-    1: {
-        "en": "Mainly clear",
-        "pt": "Principalmente limpo",
-        "es": "Mayormente despejado",
-        "fr": "Principalement clair",
-        "ru": "Преимущественно ясно"
-    },
-    2: {
-        "en": "Partly cloudy",
-        "pt": "Parcialmente nublado",
-        "es": "Parcialmente nublado",
-        "fr": "Partiellement nuageux",
-        "ru": "Переменная облачность"
-    },
-    3: {
-        "en": "Overcast",
-        "pt": "Encoberto",
-        "es": "Cubierto",
-        "fr": "Couvert",
-        "ru": "Пасмурно"
-    }
-}
-
-
-# =========================
-# 🌐 SAFE REQUEST
-# =========================
-
-def get_json(url):
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=6) as response:
-            return json.loads(response.read().decode())
-    except:
-        return None
-
-
-# =========================
-# 📍 LOCATION
-# =========================
-
-def get_ip_location():
-    data = get_json("http://ip-api.com/json/")
-    if data and data.get("status") == "success":
-        return data["lat"], data["lon"], data["city"]
-    return None, None, None
-
-
-def geocode_city(city):
-    url = f"https://geocoding-api.open-meteo.com/v1/search?name={urllib.parse.quote(city)}&count=1"
-    data = get_json(url)
-    if data and data.get("results"):
-        r = data["results"][0]
-        return r["latitude"], r["longitude"], r["name"]
-    return None, None, None
-
-
-# =========================
-# ☁ OPENWEATHER (WITH LANG)
-# =========================
-
-def get_openweather(lat, lon, unit, api_key, lang):
-
-    units = "metric" if unit == "metric" else "imperial"
-
-    url = (
-        f"https://api.openweathermap.org/data/2.5/forecast?"
-        f"lat={lat}&lon={lon}&units={units}&appid={api_key}&lang={lang}"
-    )
-
-    data = get_json(url)
-    if not data or "list" not in data:
-        return None
-
-    current = data["list"][0]
-    forecasts = data["list"][8:32:8]
-
-    result = {
-        "current_temp": current["main"]["temp"],
-        "current_desc": current["weather"][0]["description"],
-        "forecast": []
-    }
-
-    for f in forecasts[:3]:
-        result["forecast"].append({
-            "temp": f["main"]["temp"],
-            "desc": f["weather"][0]["description"]
-        })
-
-    return result
-
-
-# =========================
-# 🌤 OPEN-METEO (WITH WMO)
-# =========================
-
-def get_open_meteo(lat, lon, unit, lang):
-
-    temp_unit = "celsius" if unit == "metric" else "fahrenheit"
-
-    url = (
-        f"https://api.open-meteo.com/v1/forecast?"
-        f"latitude={lat}&longitude={lon}"
-        f"&current_weather=true"
-        f"&daily=temperature_2m_max,temperature_2m_min"
-        f"&temperature_unit={temp_unit}"
-        f"&timezone=auto"
-    )
-
-    data = get_json(url)
-    if not data:
-        return None
-
-    current = data["current_weather"]
-    daily = data["daily"]
-
-    wmo_code = current["weathercode"]
-    description = WMO_TRANSLATIONS.get(wmo_code, {}).get(lang, "Weather")
-
-    result = {
-        "current_temp": current["temperature"],
-        "current_desc": description,
-        "forecast": []
-    }
-
-    for i in range(1, 4):
-        result["forecast"].append({
-            "temp": f"{daily['temperature_2m_max'][i]} / {daily['temperature_2m_min'][i]}",
-            "desc": ""
-        })
-
-    return result
-
-
-# =========================
-# 🚀 EXTENSION
-# =========================
-
-class UWeatherExtension(Extension):
     def __init__(self):
         super().__init__()
-        self.subscribe(KeywordQueryEvent, WeatherHandler())
+        self.subscribe(KeywordQueryEvent, WeatherListener())
+        self.session = create_session()
+        self.cache = {}
+        self.base_path = os.path.dirname(os.path.abspath(__file__))
+        self.icon_default = os.path.join(self.base_path, "images", "icon.png")
+
+        threading.Thread(target=self.preload_weather,
+                         daemon=True).start()
+
+    def icon(self, filename):
+        path = os.path.join(self.base_path, "images", filename)
+        return path if os.path.exists(path) else self.icon_default
+
+    def preload_weather(self):
+        try:
+            api_key = self.preferences.get("api_key")
+            if not api_key:
+                return
+            geo = WeatherService.fetch_location(self.session)
+            data = WeatherService.fetch_weather(
+                self.session,
+                api_key,
+                lat=geo["latitude"],
+                lon=geo["longitude"]
+            )
+            self.cache["auto"] = (data, time.time())
+        except Exception as e:
+            logger.error(f"Preload falhou: {e}")
 
 
-class WeatherHandler(EventListener):
+# ==============================
+# LISTENER
+# ==============================
+class WeatherListener(EventListener):
 
     def on_event(self, event, extension):
+        try:
+            api_key = extension.preferences.get("api_key")
+            if not api_key:
+                raise Exception("Configure sua API Key do OpenWeather")
 
-        prefs = extension.preferences
+            query = event.get_argument()
+            key = query.lower().strip() if query else "auto"
 
-        provider = prefs.get("provider", "openweather")
-        unit = prefs.get("unit", "metric")
-        location_mode = prefs.get("location_mode", "auto")
-        static_city = prefs.get("static_city", "")
-        api_key = prefs.get("api_key", "")
-        lang = prefs.get("language", "en")
-        view_mode = int(prefs.get("view_mode", 5))
+            # cache
+            if key in extension.cache:
+                data, ts = extension.cache[key]
+                if time.time() - ts < CACHE_TTL:
+                    return self.render(data, extension)
 
-        T = TEXTS.get(lang, TEXTS["en"])
-
-        if location_mode == "manual" and static_city:
-            lat, lon, city = geocode_city(static_city)
-        else:
-            lat, lon, city = get_ip_location()
-
-        if not lat:
-            return SmallResultItem(
-                icon='images/icon.png',
-                name="Location failed",
-                description="",
-                on_enter=DoNothingAction()
-            )
-
-        cache_key = f"{provider}-{lat}-{lon}-{unit}-{lang}"
-        cached = get_cache(cache_key)
-        if cached:
-            weather = cached
-        else:
-            if provider == "openweather":
-                weather = get_openweather(lat, lon, unit, api_key, lang)
+            # fetch
+            if query:
+                data = WeatherService.fetch_weather(
+                    extension.session,
+                    api_key,
+                    city=query
+                )
             else:
-                weather = get_open_meteo(lat, lon, unit, lang)
+                geo = WeatherService.fetch_location(extension.session)
+                data = WeatherService.fetch_weather(
+                    extension.session,
+                    api_key,
+                    lat=geo["latitude"],
+                    lon=geo["longitude"]
+                )
 
-            if weather:
-                set_cache(cache_key, weather)
+            extension.cache[key] = (data, time.time())
+            return self.render(data, extension)
 
-        if not weather:
-            return SmallResultItem(
-                icon='images/icon.png',
-                name="Weather error",
-                description="",
-                on_enter=DoNothingAction()
+        except Exception as e:
+            msg = str(e)
+
+            if "Cidade não encontrada" in msg:
+                name = "Cidade não encontrada"
+                desc = "Digite uma cidade válida para continuar"
+                icon = extension.icon("icon.png")
+            else:
+                name = "Erro ao obter clima"
+                desc = msg
+                icon = extension.icon("error.png")
+
+            return RenderResultListAction([
+                ExtensionResultItem(
+                    icon=icon,
+                    name=name,
+                    description=desc,
+                    on_enter=None
+                )
+            ])
+
+    # ==============================
+    # RENDER
+    # ==============================
+    def render(self, data, extension):
+        forecast = data["forecast"]
+
+        tomorrow = forecast[0] if len(forecast) > 0 else None
+        after = forecast[1] if len(forecast) > 1 else None
+
+        desc_parts = []
+
+        if tomorrow:
+            desc_parts.append(
+                f"Amanhã: {tomorrow['min']}º / {tomorrow['max']}º"
             )
 
-        symbol = "°C" if unit == "metric" else "°F"
+        if after:
+            desc_parts.append(
+                f"Depois: {after['min']}º / {after['max']}º"
+            )
 
-        if view_mode == 1:
-            desc = f"{weather['current_temp']}{symbol}"
+        description = " | ".join(desc_parts)
 
-        elif view_mode == 2:
-            desc = f"{weather['current_temp']}{symbol} - {weather['current_desc']}"
-
-        elif view_mode == 3:
-            desc = f"{T['current']}: {weather['current_temp']}{symbol}"
-
-        elif view_mode == 4:
-            forecast = " | ".join(f"{f['temp']}{symbol}" for f in weather["forecast"])
-            desc = f"{weather['current_temp']}{symbol} → {forecast}"
-
-        else:
-            forecast = " | ".join(f"{f['temp']}{symbol}" for f in weather["forecast"])
-            desc = f"{T['current']}: {weather['current_temp']}{symbol} - {weather['current_desc']}\n{T['forecast']}: {forecast}"
-
-        return ExtensionResultItem(
-            icon='images/icon.png',
-            name=f"📍 {city}",
-            description=desc,
-            on_enter=DoNothingAction()
-        )
+        return RenderResultListAction([
+            ExtensionResultItem(
+                icon=extension.icon("icon.png"),
+                name=f"{data['city']}\n{data['current']['temp']}º",
+                description=description,
+                on_enter=None
+            )
+        ])
 
 
 if __name__ == "__main__":
-    UWeatherExtension().run()
+    UWeather().run()
