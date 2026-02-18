@@ -113,7 +113,7 @@ def get_weather_openmeteo(lat, lon, unit="metric"):
         return None
 
     weather_code = current.get("weathercode")
-    desc = WMO.get(weather_code, "")
+    desc = WMO.get(weather_code, "Sem descrição")
 
     forecast = []
     try:
@@ -125,7 +125,7 @@ def get_weather_openmeteo(lat, lon, unit="metric"):
         LOG.warning(f"Erro ao montar forecast Open-Meteo: {e}")
 
     result = {
-        "current_temp": current.get("temperature"),
+        "current_temp": current.get("temperature", 0),
         "current_desc": desc,
         "forecast": forecast
     }
@@ -148,34 +148,41 @@ def get_weather_openweather(lat, lon, api_key, unit="metric"):
     if not data or "current" not in data:
         return None
 
-    current = data["current"]
+    current = data.get("current", {})
     daily = data.get("daily", [])
 
-    weather_code = current.get("weather", [{}])[0].get("id")
-    desc = current.get("weather", [{}])[0].get("description", "")
-    
+    temp_current = round(current.get("temp", 0))
+    weather_list = current.get("weather", [])
+    desc = weather_list[0].get("description", "").capitalize() if weather_list else "Sem descrição"
+
     forecast = []
     try:
         for day in daily[1:4]:
-            max_temp = day.get("temp", {}).get("max")
-            min_temp = day.get("temp", {}).get("min")
-            if max_temp is not None and min_temp is not None:
-                forecast.append(f"{round(max_temp)} / {round(min_temp)}")
+            temp = day.get("temp", {})
+            max_temp = round(temp.get("max", 0))
+            min_temp = round(temp.get("min", 0))
+            forecast.append(f"{max_temp} / {min_temp}")
     except Exception as e:
         LOG.warning(f"Erro ao montar forecast OpenWeather: {e}")
 
     result = {
-        "current_temp": round(current.get("temp", 0)),
-        "current_desc": desc.capitalize(),
+        "current_temp": temp_current,
+        "current_desc": desc,
         "forecast": forecast
     }
     set_cache(cache_key, result)
     return result
 
 def get_weather(lat, lon, provider="openmeteo", api_key="", unit="metric"):
+    weather = None
     if provider == "openweather":
-        return get_weather_openweather(lat, lon, api_key, unit)
-    return get_weather_openmeteo(lat, lon, unit)
+        weather = get_weather_openweather(lat, lon, api_key, unit)
+        if not weather:
+            LOG.warning("OpenWeather falhou, fallback para Open-Meteo")
+            weather = get_weather_openmeteo(lat, lon, unit)
+    else:
+        weather = get_weather_openmeteo(lat, lon, unit)
+    return weather
 
 # =========================
 # 🚀 EXTENSÃO PRINCIPAL
@@ -187,7 +194,7 @@ class UWeatherExtension(Extension):
 
 class KeywordQueryEventListener(EventListener):
     def on_event(self, event, extension):
-        # Preferências
+        # Preferências do JSON
         unit = extension.preferences.get("unit", "metric")
         location_mode = extension.preferences.get("location_mode", "auto")
         static_city = extension.preferences.get("static_city", "").strip()
@@ -218,7 +225,7 @@ class KeywordQueryEventListener(EventListener):
         symbol = "°C" if unit == "metric" else "°F"
         flag = country_flag(country)
         current_temp = weather["current_temp"]
-        current_desc = weather["current_desc"] or ""
+        current_desc = weather["current_desc"] or "Sem descrição"
         forecast = " | ".join(weather["forecast"])
 
         first_line = f"{current_temp}{symbol} - {current_desc}" if current_desc else f"{current_temp}{symbol}"
@@ -234,6 +241,7 @@ class KeywordQueryEventListener(EventListener):
         ])
 
 def render_error(message):
+    """Garante que sempre aparece um item de erro no Ulauncher"""
     return RenderResultListAction([
         SmallResultItem(
             icon='images/icon.png',
