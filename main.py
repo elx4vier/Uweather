@@ -1,133 +1,177 @@
 import json
 import urllib.request
 import urllib.parse
-import time
-import math
-
 from ulauncher.api.client.EventListener import EventListener
 from ulauncher.api.client.Extension import Extension
-from ulauncher.api.client.ActionThread import ActionThread
 from ulauncher.api.shared.event import KeywordQueryEvent
 from ulauncher.api.shared.item.ExtensionResultItem import ExtensionResultItem
 from ulauncher.api.shared.item.SmallResultItem import SmallResultItem
-from ulauncher.api.shared.action.RenderResultListAction import RenderResultListAction
 from ulauncher.api.shared.action.DoNothingAction import DoNothingAction
 
 
-CACHE = {}
-CACHE_TTL = 600
+# =========================
+# 🌍 INTERFACE LANGUAGES
+# (Affects only launcher results)
+# =========================
+
+TEXTS = {
+    "en": {
+        "current": "Current weather",
+        "forecast": "Forecast",
+        "fail_location": "Location detection failed",
+        "fail_weather": "Failed to retrieve weather data",
+        "provider_error": "Weather provider not implemented"
+    },
+    "pt": {
+        "current": "Clima atual",
+        "forecast": "Previsão",
+        "fail_location": "Falha na localização",
+        "fail_weather": "Falha ao obter clima",
+        "provider_error": "Provedor não implementado"
+    },
+    "es": {
+        "current": "Clima actual",
+        "forecast": "Pronóstico",
+        "fail_location": "Error de ubicación",
+        "fail_weather": "Error al obtener clima",
+        "provider_error": "Proveedor no implementado"
+    },
+    "ru": {
+        "current": "Текущая погода",
+        "forecast": "Прогноз",
+        "fail_location": "Ошибка определения местоположения",
+        "fail_weather": "Ошибка получения погоды",
+        "provider_error": "Провайдер не реализован"
+    },
+    "fr": {
+        "current": "Météo actuelle",
+        "forecast": "Prévision",
+        "fail_location": "Échec de localisation",
+        "fail_weather": "Échec récupération météo",
+        "provider_error": "Fournisseur non implémenté"
+    }
+}
 
 
 # =========================
-# CACHE
-# =========================
-
-def get_cache(key):
-    if key in CACHE and time.time() - CACHE[key]["time"] < CACHE_TTL:
-        return CACHE[key]["data"]
-    return None
-
-
-def set_cache(key, data):
-    CACHE[key] = {"time": time.time(), "data": data}
-
-
-# =========================
-# DISTÂNCIA
-# =========================
-
-def distance(lat1, lon1, lat2, lon2):
-    return math.sqrt((lat1 - lat2) ** 2 + (lon1 - lon2) ** 2)
-
-
-# =========================
-# BANDEIRA
-# =========================
-
-def country_flag(code):
-    if not code:
-        return ""
-    return "".join(chr(127397 + ord(c)) for c in code.upper())
-
-
-# =========================
-# REQUEST
+# 🌐 HTTP SAFE REQUEST
 # =========================
 
 def get_json(url):
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=3) as response:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+        with urllib.request.urlopen(req, timeout=6) as response:
             return json.loads(response.read().decode())
     except:
         return None
 
 
 # =========================
-# LOCALIZAÇÃO DO USUÁRIO
+# 📍 LOCATION
 # =========================
 
 def get_ip_location():
-    cached = get_cache("ip")
-    if cached:
-        return cached
-
     data = get_json("http://ip-api.com/json/")
     if data and data.get("status") == "success":
-        result = (data["lat"], data["lon"], data["city"])
-        set_cache("ip", result)
-        return result
+        return data["lat"], data["lon"], data["city"]
+    return None, None, None
 
+
+def geocode_city(city):
+    url = f"https://geocoding-api.open-meteo.com/v1/search?name={urllib.parse.quote(city)}&count=1"
+    data = get_json(url)
+    if data and data.get("results"):
+        r = data["results"][0]
+        return r["latitude"], r["longitude"], r["name"]
     return None, None, None
 
 
 # =========================
-# GEOCODE
+# ☁ OPENWEATHER
 # =========================
 
-def geocode_city(query):
+def get_openweather(lat, lon, unit, api_key):
+    if not api_key:
+        return None
 
-    cache_key = f"geo-{query.lower()}"
-    cached = get_cache(cache_key)
-    if cached:
-        return cached
+    units = "metric" if unit == "metric" else "imperial"
 
-    url = f"https://geocoding-api.open-meteo.com/v1/search?name={urllib.parse.quote(query)}&count=7"
+    url = (
+        f"https://api.openweathermap.org/data/2.5/forecast?"
+        f"lat={lat}&lon={lon}&units={units}&appid={api_key}"
+    )
+
     data = get_json(url)
+    if not data or "list" not in data:
+        return None
 
-    if not data or not data.get("results"):
-        return []
+    try:
+        current = data["list"][0]
+        forecasts = data["list"][8:32:8]
 
-    results = data["results"]
-    set_cache(cache_key, results)
-    return results
+        result = {
+            "current_temp": current["main"]["temp"],
+            "current_desc": current["weather"][0]["description"],
+            "forecast": []
+        }
+
+        for f in forecasts[:3]:
+            result["forecast"].append({
+                "temp": f["main"]["temp"],
+                "desc": f["weather"][0]["description"]
+            })
+
+        return result
+    except:
+        return None
 
 
 # =========================
-# WEATHER
+# 🌤 OPEN-METEO
 # =========================
 
-def get_weather(lat, lon, unit):
-
+def get_open_meteo(lat, lon, unit):
     temp_unit = "celsius" if unit == "metric" else "fahrenheit"
 
     url = (
         f"https://api.open-meteo.com/v1/forecast?"
         f"latitude={lat}&longitude={lon}"
         f"&current_weather=true"
+        f"&daily=temperature_2m_max,temperature_2m_min"
         f"&temperature_unit={temp_unit}"
         f"&timezone=auto"
     )
 
     data = get_json(url)
-    if not data:
+    if not data or "current_weather" not in data:
         return None
 
-    return data["current_weather"]["temperature"]
+    try:
+        current = data["current_weather"]
+        daily = data["daily"]
+
+        result = {
+            "current_temp": current["temperature"],
+            "current_desc": f"WMO {current['weathercode']}",
+            "forecast": []
+        }
+
+        for i in range(1, 4):
+            result["forecast"].append({
+                "temp": f"{daily['temperature_2m_max'][i]} / {daily['temperature_2m_min'][i]}",
+                "desc": ""
+            })
+
+        return result
+    except:
+        return None
 
 
 # =========================
-# EXTENSION
+# 🚀 EXTENSION CORE
 # =========================
 
 class UWeatherExtension(Extension):
@@ -140,124 +184,95 @@ class WeatherHandler(EventListener):
 
     def on_event(self, event, extension):
 
-        query = (event.get_argument() or "").strip()
-        unit = extension.preferences.get("unit", "metric")
+        prefs = extension.preferences
 
-        # 🔥 MOSTRAR 3 CIDADES PRÓXIMAS AO ABRIR
-        if not query:
-            extension.run_thread(ActionThread(self.show_nearby, extension, unit))
+        provider = prefs.get("provider", "openweather")
+        unit = prefs.get("unit", "metric")
+        location_mode = prefs.get("location_mode", "auto")
+        static_city = prefs.get("static_city", "")
+        api_key = prefs.get("api_key", "")
+        language = prefs.get("language", "en")
+        view_mode = int(prefs.get("view_mode", 5))
 
-            return RenderResultListAction([
-                SmallResultItem(
-                    icon='images/icon.png',
-                    name="Detectando cidades próximas...",
-                    description="Carregando...",
-                    on_enter=DoNothingAction()
-                )
-            ])
+        T = TEXTS.get(language, TEXTS["en"])
 
-        # 🔥 AUTOCOMPLETE INTELIGENTE ENQUANTO DIGITA
-        extension.run_thread(
-            ActionThread(self.search_and_render, extension, query, unit)
-        )
+        # =========================
+        # LOCATION
+        # =========================
 
-        return RenderResultListAction([
-            SmallResultItem(
+        if location_mode == "manual" and static_city:
+            lat, lon, city = geocode_city(static_city)
+        else:
+            lat, lon, city = get_ip_location()
+
+        if not lat or not lon:
+            return SmallResultItem(
                 icon='images/icon.png',
-                name=f"Buscando: {query}",
-                description="Digite mais para refinar...",
+                name=T["fail_location"],
+                description="",
                 on_enter=DoNothingAction()
             )
-        ])
 
-    # =========================
-    # MOSTRAR PRÓXIMAS
-    # =========================
+        # =========================
+        # PROVIDER
+        # =========================
 
-    def show_nearby(self, extension, unit):
-
-        lat, lon, city_name = get_ip_location()
-        if not lat:
-            extension.set_results([
-                SmallResultItem(
-                    icon='images/icon.png',
-                    name="Erro de localização",
-                    description="Não foi possível detectar sua cidade",
-                    on_enter=DoNothingAction()
-                )
-            ])
-            return
-
-        cities = geocode_city(city_name)
-
-        items = []
-
-        for city in cities[:3]:
-
-            temp = get_weather(city["latitude"], city["longitude"], unit)
-            if temp is None:
-                continue
-
-            flag = country_flag(city.get("country_code"))
-            symbol = "°C" if unit == "metric" else "°F"
-
-            items.append(
-                ExtensionResultItem(
-                    icon='images/icon.png',
-                    name=f"{flag} {city['name']} ({city['country_code']})",
-                    description=f"{temp}{symbol}",
-                    on_enter=DoNothingAction()
-                )
+        if provider == "openweather":
+            weather = get_openweather(lat, lon, unit, api_key)
+        elif provider == "openmeteo":
+            weather = get_open_meteo(lat, lon, unit)
+        else:
+            return SmallResultItem(
+                icon='images/icon.png',
+                name=T["provider_error"],
+                description="",
+                on_enter=DoNothingAction()
             )
 
-        extension.set_results(items)
-
-    # =========================
-    # BUSCA INTELIGENTE
-    # =========================
-
-    def search_and_render(self, extension, query, unit):
-
-        user_lat, user_lon, _ = get_ip_location()
-        cities = geocode_city(query)
-
-        if not cities:
-            extension.set_results([
-                SmallResultItem(
-                    icon='images/icon.png',
-                    name="Cidade não encontrada",
-                    description="Digite uma cidade válida",
-                    on_enter=DoNothingAction()
-                )
-            ])
-            return
-
-        if user_lat:
-            cities.sort(key=lambda c:
-                distance(user_lat, user_lon, c["latitude"], c["longitude"])
+        if not weather:
+            return SmallResultItem(
+                icon='images/icon.png',
+                name=T["fail_weather"],
+                description="",
+                on_enter=DoNothingAction()
             )
 
-        items = []
+        symbol = "°C" if unit == "metric" else "°F"
 
-        for city in cities[:5]:
+        # =========================
+        # DISPLAY MODES (1–5)
+        # =========================
 
-            temp = get_weather(city["latitude"], city["longitude"], unit)
-            if temp is None:
-                continue
+        if view_mode == 1:  # Ultra Minimal
+            desc = f"{weather['current_temp']}{symbol}"
 
-            flag = country_flag(city.get("country_code"))
-            symbol = "°C" if unit == "metric" else "°F"
+        elif view_mode == 2:  # Minimal
+            desc = f"{weather['current_temp']}{symbol} - {weather['current_desc']}"
 
-            items.append(
-                ExtensionResultItem(
-                    icon='images/icon.png',
-                    name=f"{flag} {city['name']} ({city.get('admin1','')}) ({city['country_code']})",
-                    description=f"{temp}{symbol}",
-                    on_enter=DoNothingAction()
-                )
+        elif view_mode == 3:  # Compact
+            desc = f"{T['current']}: {weather['current_temp']}{symbol}"
+
+        elif view_mode == 4:  # Full
+            forecast_text = " | ".join(
+                f"{f['temp']}{symbol}" for f in weather["forecast"]
+            )
+            desc = f"{weather['current_temp']}{symbol} → {forecast_text}"
+
+        else:  # Detailed
+            forecast_text = " | ".join(
+                f"{f['temp']}{symbol}" for f in weather["forecast"]
+            )
+            desc = (
+                f"{T['current']}: {weather['current_temp']}{symbol} - {weather['current_desc']}\n"
+                f"{T['forecast']}: {forecast_text}"
             )
 
-        extension.set_results(items)
+        return ExtensionResultItem(
+            icon='images/icon.png',
+            name=f"📍 {city}",
+            description=desc,
+            on_enter=DoNothingAction()
+        )
 
 
 if __name__ == "__main__":
