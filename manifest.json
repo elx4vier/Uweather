@@ -4,7 +4,7 @@
 
   "name": "UWeather",
   "display_name": "UWeather",
-  "description": "Fast and lightweight weather extension with automatic location detection and customizable display.",
+  "description": "Weather extension with configurable provider, location, units, and interface display.",
 
   "developer_name": "Xavier",
   "icon": "images/icon.png",
@@ -20,15 +20,77 @@
       "type": "keyword",
       "name": "Keyword",
       "default_value": "w",
-      "description": "Type this keyword to trigger the weather search."
+      "description": "Word to trigger the weather search."
+    },
+
+    {
+      "id": "provider",
+      "type": "select",
+      "name": "Weather Provider",
+      "default_value": "open-meteo",
+      "options": [
+        { "text": "Open-Meteo (no API key required)", "value": "open-meteo" },
+        { "text": "OpenWeather (requires API key)", "value": "openweather" }
+      ]
     },
 
     {
       "id": "api_key",
       "type": "input",
       "name": "OpenWeather API Key",
-      "description": "Required to fetch weather data from OpenWeather.",
+      "description": "Required only if OpenWeather is selected.",
       "default_value": ""
+    },
+
+    {
+      "id": "unit",
+      "type": "select",
+      "name": "Temperature Unit",
+      "default_value": "C",
+      "options": [
+        { "text": "Celsius (°C)", "value": "C" },
+        { "text": "Fahrenheit (°F)", "value": "F" }
+      ]
+    },
+
+    {
+      "id": "location_mode",
+      "type": "select",
+      "name": "Location Mode",
+      "default_value": "auto",
+      "options": [
+        { "text": "Automatic", "value": "auto" },
+        { "text": "Manual (Static City)", "value": "manual" }
+      ]
+    },
+
+    {
+      "id": "static_city",
+      "type": "input",
+      "name": "Manual City",
+      "description": "Used only if Location Mode is set to Manual. Example: São Luís, BR",
+      "default_value": ""
+    },
+
+    {
+      "id": "interface_mode",
+      "type": "select",
+      "name": "Interface Display",
+      "default_value": "complete",
+      "options": [
+        {
+          "text": "Complete – Full info with city, country code, flag, current temp, condition, forecast for tomorrow and day after (with emoji)",
+          "value": "complete"
+        },
+        {
+          "text": "Essential – Current temp, condition, city, country code and flag",
+          "value": "essential"
+        },
+        {
+          "text": "Minimal – One line: temp and city with flag (no decimals)",
+          "value": "minimal"
+        }
+      ]
     }
 
   ]
