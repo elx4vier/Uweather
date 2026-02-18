@@ -9,7 +9,7 @@ from urllib3.util.retry import Retry
 from ulauncher.api.client.Extension import Extension
 from ulauncher.api.client.EventListener import EventListener
 from ulauncher.api.shared.event import KeywordQueryEvent
-from ulauncher.api.shared.item import ExtensionResultItem
+from ulauncher.api.shared.item.ExtensionResultItem import ExtensionResultItem
 from ulauncher.api.shared.action.RenderResultListAction import RenderResultListAction
 
 logger = logging.getLogger(__name__)
@@ -34,40 +34,6 @@ def country_flag(country_code):
         return ""
     offset = 127397
     return chr(ord(country_code[0].upper())+offset) + chr(ord(country_code[1].upper())+offset)
-
-# ==============================
-# OPEN-METEO CODES
-# ==============================
-OPEN_METEO_CODES_PT = {
-    0: "céu limpo",
-    1: "principalmente limpo",
-    2: "parcialmente nublado",
-    3: "nublado",
-    45: "neblina",
-    48: "neblina com gelo",
-    51: "chuva fraca",
-    53: "chuva moderada",
-    55: "chuva intensa",
-    56: "chuva congelante fraca",
-    57: "chuva congelante intensa",
-    61: "chuva fraca",
-    63: "chuva moderada",
-    65: "chuva intensa",
-    66: "chuva congelante fraca",
-    67: "chuva congelante intensa",
-    71: "neve fraca",
-    73: "neve moderada",
-    75: "neve intensa",
-    77: "granizo",
-    80: "aguaceiro fraco",
-    81: "aguaceiro moderado",
-    82: "aguaceiro intenso",
-    85: "neve fraca",
-    86: "neve intensa",
-    95: "tempestade",
-    96: "tempestade com granizo",
-    99: "tempestade forte com granizo"
-}
 
 # ==============================
 # WEATHER SERVICE
@@ -96,6 +62,9 @@ class WeatherService:
             pass
         raise Exception("Falha na localização")
 
+    # ------------------------------
+    # OpenWeather
+    # ------------------------------
     @staticmethod
     def fetch_weather_openweather(session, api_key, city=None, lat=None, lon=None, unit="C"):
         if city:
@@ -109,9 +78,13 @@ class WeatherService:
             raise Exception("Cidade não encontrada")
         return WeatherService.parse_weather(data)
 
+    # ------------------------------
+    # Open-Meteo
+    # ------------------------------
     @staticmethod
     def fetch_weather_openmeteo(session, city=None, lat=None, lon=None, unit="C"):
         if city and not lat and not lon:
+            # Busca coordenadas via geocoding gratuito
             r = session.get(f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1", timeout=5)
             geo = r.json().get("results")
             if not geo:
@@ -124,6 +97,7 @@ class WeatherService:
             city_name = city or "Desconhecida"
             country = "BR"
 
+        # Previsão diária
         r = session.get(f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&daily=temperature_2m_max,temperature_2m_min,weathercode&current_weather=true&timezone=auto", timeout=5)
         data = r.json()
 
@@ -137,18 +111,15 @@ class WeatherService:
                     "code": daily["weathercode"][i]
                 })
 
-        current_weather = data.get("current_weather", {})
-        code = current_weather.get("weathercode", 0)
-        description = OPEN_METEO_CODES_PT.get(code, "Desconhecido")
-
+        current = data.get("current_weather", {})
         return {
             "city": f"{city_name}, {country}",
             "city_name": city_name,
             "country": country,
             "current": {
-                "temp": int(current_weather.get("temperature", 0)),
-                "code": code,
-                "desc": description
+                "temp": int(current.get("temperature",0)),
+                "code": current.get("weathercode",0),
+                "desc": "Desconhecido"
             },
             "forecast": forecast_list
         }
@@ -282,6 +253,9 @@ class WeatherListener(EventListener):
                 ExtensionResultItem(icon=icon, name=name, description=desc, on_enter=None)
             ])
 
+    # ==============================
+    # RENDER
+    # ==============================
     def render(self, data, extension, interface_mode):
         city_name = data.get("city_name") or "Desconhecida"
         country = data.get("country") or "BR"
@@ -290,6 +264,9 @@ class WeatherListener(EventListener):
         desc = data["current"]["desc"]
         forecast = data.get("forecast", [])
 
+        # -----------------------------
+        # Completo: 3 linhas, terceira linha menor
+        # -----------------------------
         if interface_mode=="complete":
             line1 = f"{city_name}, {country} {flag}"
             line2 = f"{temp}º, {desc}"
@@ -303,18 +280,25 @@ class WeatherListener(EventListener):
                 if after:
                     parts.append(f"Depois: {after['min']}º / {after['max']}º")
                 line3 = " | ".join(parts)
+            # terceira linha em description → fonte menor
             name = f"{line1}\n{line2}"
             description = line3
 
+        # -----------------------------
+        # Essencial: duas linhas, vírgula após temperatura
+        # -----------------------------
         elif interface_mode=="essential":
             line1 = f"{temp}º, {desc}"
             line2 = f"{city_name}, {country} {flag}"
             name = line1
             description = line2
 
+        # -----------------------------
+        # Mínimo: linha pequena, fonte simulada menor
+        # -----------------------------
         elif interface_mode=="minimal":
             name = f"{temp}º - {city_name} {flag}"
-            description = ""
+            description = ""  # fonte menor simulada por estar vazio
 
         return RenderResultListAction([
             ExtensionResultItem(
