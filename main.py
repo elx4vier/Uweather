@@ -35,24 +35,20 @@ WMO = {
 # ⚡ FUNÇÕES AUXILIARES
 # =========================
 def get_cache(key):
-    """Retorna dados do cache se não expirou."""
     entry = CACHE.get(key)
     if entry and (time.time() - entry["time"] < CACHE_TTL):
         return entry["data"]
     return None
 
 def set_cache(key, data):
-    """Armazena dados no cache com timestamp."""
     CACHE[key] = {"time": time.time(), "data": data}
 
 def country_flag(code):
-    """Retorna bandeira emoji do país."""
     if not code:
         return ""
     return "".join(chr(127397 + ord(c)) for c in code.upper())
 
 def get_json(url):
-    """Faz requisição HTTP e retorna JSON."""
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=5) as resp:
@@ -65,7 +61,6 @@ def get_json(url):
 # 📍 GEOCODING
 # =========================
 def geocode_city(city):
-    """Converte nome da cidade em latitude, longitude e país."""
     cache_key = f"geo-{city.lower()}"
     cached = get_cache(cache_key)
     if cached:
@@ -80,7 +75,6 @@ def geocode_city(city):
     return None, None, None, None
 
 def get_ip_location():
-    """Obtém localização aproximada pelo IP."""
     cached = get_cache("ip-location")
     if cached:
         return cached
@@ -94,9 +88,8 @@ def get_ip_location():
 # =========================
 # 🌤 WEATHER
 # =========================
-def get_weather(lat, lon, unit="metric"):
-    """Obtém clima atual e previsão para os próximos dias."""
-    cache_key = f"weather-{lat}-{lon}-{unit}"
+def get_weather_openmeteo(lat, lon, unit="metric"):
+    cache_key = f"weather-om-{lat}-{lon}-{unit}"
     cached = get_cache(cache_key)
     if cached:
         return cached
@@ -129,7 +122,7 @@ def get_weather(lat, lon, unit="metric"):
             min_temp = daily["temperature_2m_min"][i]
             forecast.append(f"{max_temp} / {min_temp}")
     except Exception as e:
-        LOG.warning(f"Erro ao montar forecast: {e}")
+        LOG.warning(f"Erro ao montar forecast Open-Meteo: {e}")
 
     result = {
         "current_temp": current.get("temperature"),
@@ -138,6 +131,51 @@ def get_weather(lat, lon, unit="metric"):
     }
     set_cache(cache_key, result)
     return result
+
+def get_weather_openweather(lat, lon, api_key, unit="metric"):
+    if not api_key:
+        return None
+    cache_key = f"weather-ow-{lat}-{lon}-{unit}"
+    cached = get_cache(cache_key)
+    if cached:
+        return cached
+
+    url = (
+        f"http://api.openweathermap.org/data/2.5/onecall?"
+        f"lat={lat}&lon={lon}&appid={api_key}&units={unit}&exclude=minutely,hourly,alerts"
+    )
+    data = get_json(url)
+    if not data or "current" not in data:
+        return None
+
+    current = data["current"]
+    daily = data.get("daily", [])
+
+    weather_code = current.get("weather", [{}])[0].get("id")
+    desc = current.get("weather", [{}])[0].get("description", "")
+    
+    forecast = []
+    try:
+        for day in daily[1:4]:
+            max_temp = day.get("temp", {}).get("max")
+            min_temp = day.get("temp", {}).get("min")
+            if max_temp is not None and min_temp is not None:
+                forecast.append(f"{round(max_temp)} / {round(min_temp)}")
+    except Exception as e:
+        LOG.warning(f"Erro ao montar forecast OpenWeather: {e}")
+
+    result = {
+        "current_temp": round(current.get("temp", 0)),
+        "current_desc": desc.capitalize(),
+        "forecast": forecast
+    }
+    set_cache(cache_key, result)
+    return result
+
+def get_weather(lat, lon, provider="openmeteo", api_key="", unit="metric"):
+    if provider == "openweather":
+        return get_weather_openweather(lat, lon, api_key, unit)
+    return get_weather_openmeteo(lat, lon, unit)
 
 # =========================
 # 🚀 EXTENSÃO PRINCIPAL
@@ -149,44 +187,34 @@ class UWeatherExtension(Extension):
 
 class KeywordQueryEventListener(EventListener):
     def on_event(self, event, extension):
+        # Preferências
         unit = extension.preferences.get("unit", "metric")
+        location_mode = extension.preferences.get("location_mode", "auto")
+        static_city = extension.preferences.get("static_city", "").strip()
+        provider = extension.preferences.get("provider", "openmeteo")
+        api_key = extension.preferences.get("api_key", "").strip()
         query = event.get_argument()
 
-        # Se não há argumento, usa localização automática
-        if not query:
-            lat, lon, city, country = get_ip_location()
+        # Determina cidade / coordenadas
+        if location_mode == "manual" and static_city:
+            lat, lon, city, country = geocode_city(static_city)
             if not lat:
-                return RenderResultListAction([
-                    SmallResultItem(
-                        icon='images/icon.png',
-                        name="Erro de localização",
-                        description="Não foi possível obter sua localização automática.",
-                        on_enter=DoNothingAction()
-                    )
-                ])
-        else:
+                return render_error(f"Cidade manual inválida: '{static_city}'")
+        elif query:
             lat, lon, city, country = geocode_city(query)
             if not lat:
-                return RenderResultListAction([
-                    SmallResultItem(
-                        icon='images/icon.png',
-                        name="Cidade não encontrada",
-                        description=f"'{query}' não é uma cidade válida.",
-                        on_enter=DoNothingAction()
-                    )
-                ])
+                return render_error(f"Cidade não encontrada: '{query}'")
+        else:
+            lat, lon, city, country = get_ip_location()
+            if not lat:
+                return render_error("Não foi possível obter sua localização automática.")
 
-        weather = get_weather(lat, lon, unit)
+        # Obter clima
+        weather = get_weather(lat, lon, provider=provider, api_key=api_key, unit=unit)
         if not weather:
-            return RenderResultListAction([
-                SmallResultItem(
-                    icon='images/icon.png',
-                    name="Erro ao buscar clima",
-                    description="Tente novamente em instantes.",
-                    on_enter=DoNothingAction()
-                )
-            ])
+            return render_error("Erro ao buscar clima. Confira provider e API Key.")
 
+        # Formatar saída
         symbol = "°C" if unit == "metric" else "°F"
         flag = country_flag(country)
         current_temp = weather["current_temp"]
@@ -204,6 +232,16 @@ class KeywordQueryEventListener(EventListener):
                 on_enter=DoNothingAction()
             )
         ])
+
+def render_error(message):
+    return RenderResultListAction([
+        SmallResultItem(
+            icon='images/icon.png',
+            name="Erro",
+            description=message,
+            on_enter=DoNothingAction()
+        )
+    ])
 
 if __name__ == "__main__":
     UWeatherExtension().run()
