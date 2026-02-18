@@ -14,7 +14,7 @@
       "id": "keyword",
       "type": "keyword",
       "name": "Palavra-chave",
-      "default_value": "clima"
+      "default_value": "w"
     },
     {
       "id": "api_key",
@@ -28,8 +28,8 @@
       "name": "Provedor de Clima",
       "default_value": "openweather",
       "options": [
-        { "label": "OpenWeather", "value": "openweather" },
-        { "label": "Open-Meteo", "value": "openmeteo" }
+        { "name": "OpenWeather", "value": "openweather" },
+        { "name": "Open-Meteo", "value": "openmeteo" }
       ]
     },
     {
@@ -38,8 +38,8 @@
       "name": "Unidade",
       "default_value": "metric",
       "options": [
-        { "label": "Celsius (°C)", "value": "metric" },
-        { "label": "Fahrenheit (°F)", "value": "imperial" }
+        { "name": "Celsius (°C)", "value": "metric" },
+        { "name": "Fahrenheit (°F)", "value": "imperial" }
       ]
     },
     {
@@ -48,8 +48,8 @@
       "name": "Modo de Localização",
       "default_value": "auto",
       "options": [
-        { "label": "Automática (IP)", "value": "auto" },
-        { "label": "Cidade fixa", "value": "static" }
+        { "name": "Automática (IP)", "value": "auto" },
+        { "name": "Cidade fixa", "value": "static" }
       ]
     },
     {
@@ -64,11 +64,11 @@
       "name": "Visualização",
       "default_value": "full",
       "options": [
-        { "label": "Completo", "value": "full" },
-        { "label": "Compacto", "value": "compact" },
-        { "label": "Minimal", "value": "minimal" },
-        { "label": "Ultra minimal", "value": "ultra" },
-        { "label": "Linha única", "value": "singleline" }
+        { "name": "Completo", "value": "full" },
+        { "name": "Compacto", "value": "compact" },
+        { "name": "Minimal", "value": "minimal" },
+        { "name": "Ultra minimal", "value": "ultra" },
+        { "name": "Linha única", "value": "singleline" }
       ]
     },
     {
@@ -77,11 +77,11 @@
       "name": "Idioma",
       "default_value": "pt",
       "options": [
-        { "label": "Português", "value": "pt" },
-        { "label": "English", "value": "en" },
-        { "label": "Español", "value": "es" },
-        { "label": "Русский", "value": "ru" },
-        { "label": "Français", "value": "fr" }
+        { "name": "Português", "value": "pt" },
+        { "name": "English", "value": "en" },
+        { "name": "Español", "value": "es" },
+        { "name": "Русский", "value": "ru" },
+        { "name": "Français", "value": "fr" }
       ]
     }
   ]
