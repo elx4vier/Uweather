@@ -52,7 +52,12 @@ class WeatherService:
         try:
             r = session.get("http://ip-api.com/json/", timeout=5)
             geo = r.json()
-            return {"latitude": geo["lat"], "longitude": geo["lon"], "city": geo.get("city","Desconhecida"), "country": geo.get("countryCode","BR")}
+            return {
+                "latitude": geo["lat"],
+                "longitude": geo["lon"],
+                "city": geo.get("city","Desconhecida"),
+                "country": geo.get("countryCode","BR")
+            }
         except:
             pass
         raise Exception("Falha na localização")
@@ -100,7 +105,11 @@ class WeatherService:
         daily = data.get("daily", {})
         if "temperature_2m_max" in daily and "temperature_2m_min" in daily:
             for i in range(min(2, len(daily["temperature_2m_max"]))):
-                forecast_list.append({"max": int(daily["temperature_2m_max"][i]), "min": int(daily["temperature_2m_min"][i]), "code": daily["weathercode"][i]})
+                forecast_list.append({
+                    "max": int(daily["temperature_2m_max"][i]),
+                    "min": int(daily["temperature_2m_min"][i]),
+                    "code": daily["weathercode"][i]
+                })
 
         current = data.get("current_weather", {})
         return {
@@ -132,12 +141,20 @@ class WeatherService:
         sorted_dates = sorted(daily.keys())
         forecast = []
         for date in sorted_dates[1:3]:
-            forecast.append({"max": int(daily[date]["max"]), "min": int(daily[date]["min"]), "code": daily[date]["code"]})
+            forecast.append({
+                "max": int(daily[date]["max"]),
+                "min": int(daily[date]["min"]),
+                "code": daily[date]["code"]
+            })
         return {
             "city": f"{data['city']['name']}, {data['city']['country']}",
             "city_name": data['city']['name'],
             "country": data['city']['country'],
-            "current": {"temp": int(current["main"]["temp"]), "code": current["weather"][0]["id"], "desc": current["weather"][0]["description"]},
+            "current": {
+                "temp": int(current["main"]["temp"]),
+                "code": current["weather"][0]["id"],
+                "desc": current["weather"][0]["description"]
+            },
             "forecast": forecast
         }
 
@@ -165,7 +182,12 @@ class UWeather(Extension):
             if not api_key:
                 return
             geo = WeatherService.fetch_location(self.session)
-            data = WeatherService.fetch_weather_openweather(self.session, api_key, lat=geo["latitude"], lon=geo["longitude"])
+            data = WeatherService.fetch_weather_openweather(
+                self.session,
+                api_key,
+                lat=geo["latitude"],
+                lon=geo["longitude"]
+            )
             self.cache["auto"] = (data,time.time())
         except Exception as e:
             logger.error(f"Preload falhou: {e}")
@@ -197,18 +219,27 @@ class WeatherListener(EventListener):
             else:
                 key = query.lower().strip()
 
+            # Cache
             if key in extension.cache:
                 data, ts = extension.cache[key]
                 if time.time()-ts < CACHE_TTL:
                     return self.render(data, extension, interface_mode)
 
+            # Fetch weather
             if provider=="openweather":
                 if query:
-                    data = WeatherService.fetch_weather_openweather(extension.session, api_key, city=query, unit=unit)
+                    data = WeatherService.fetch_weather_openweather(
+                        extension.session, api_key, city=query, unit=unit)
                 else:
-                    data = WeatherService.fetch_weather_openweather(extension.session, api_key, lat=geo["latitude"], lon=geo["longitude"], unit=unit)
+                    data = WeatherService.fetch_weather_openweather(
+                        extension.session, api_key, lat=geo["latitude"], lon=geo["longitude"], unit=unit)
             else:
-                data = WeatherService.fetch_weather_openmeteo(extension.session, city=query, lat=geo["latitude"] if geo else None, lon=geo["longitude"] if geo else None, unit=unit)
+                data = WeatherService.fetch_weather_openmeteo(
+                    extension.session, city=query,
+                    lat=geo["latitude"] if geo else None,
+                    lon=geo["longitude"] if geo else None,
+                    unit=unit
+                )
 
             extension.cache[key] = (data,time.time())
             return self.render(data, extension, interface_mode)
@@ -225,59 +256,59 @@ class WeatherListener(EventListener):
     # ==============================
     # RENDER
     # ==============================
-def render(self, data, extension, interface_mode):
-    city_name = data.get("city_name") or "Desconhecida"
-    country = data.get("country") or "BR"
-    flag = country_flag(country)
-    temp = data["current"]["temp"]
-    desc = data["current"]["desc"]
-    forecast = data.get("forecast", [])
+    def render(self, data, extension, interface_mode):
+        city_name = data.get("city_name") or "Desconhecida"
+        country = data.get("country") or "BR"
+        flag = country_flag(country)
+        temp = data["current"]["temp"]
+        desc = data["current"]["desc"]
+        forecast = data.get("forecast", [])
 
-    # -----------------------------
-    # Completo: 3 linhas, 3ª linha em fonte menor
-    # -----------------------------
-    if interface_mode=="complete":
-        line1 = f"{city_name}, {country} {flag}"
-        line2 = f"{temp}º, {desc}"
-        line3 = ""
-        if forecast:
-            tomorrow = forecast[0]
-            after = forecast[1] if len(forecast)>1 else None
-            parts = []
-            if tomorrow:
-                parts.append(f"Amanhã: {tomorrow['min']}º / {tomorrow['max']}º")
-            if after:
-                parts.append(f"Depois: {after['min']}º / {after['max']}º")
-            line3 = " | ".join(parts)
-        # terceira linha em description → fonte menor
-        name = f"{line1}\n{line2}"
-        description = line3
+        # -----------------------------
+        # Completo: 3 linhas, terceira linha menor
+        # -----------------------------
+        if interface_mode=="complete":
+            line1 = f"{city_name}, {country} {flag}"
+            line2 = f"{temp}º, {desc}"
+            line3 = ""
+            if forecast:
+                tomorrow = forecast[0]
+                after = forecast[1] if len(forecast)>1 else None
+                parts = []
+                if tomorrow:
+                    parts.append(f"Amanhã: {tomorrow['min']}º / {tomorrow['max']}º")
+                if after:
+                    parts.append(f"Depois: {after['min']}º / {after['max']}º")
+                line3 = " | ".join(parts)
+            # terceira linha em description → fonte menor
+            name = f"{line1}\n{line2}"
+            description = line3
 
-    # -----------------------------
-    # Essencial: duas linhas, vírgula após temperatura
-    # -----------------------------
-    elif interface_mode=="essential":
-        line1 = f"{temp}º, {desc}"
-        line2 = f"{city_name}, {country} {flag}"
-        name = line1
-        description = line2
+        # -----------------------------
+        # Essencial: duas linhas, vírgula após temperatura
+        # -----------------------------
+        elif interface_mode=="essential":
+            line1 = f"{temp}º, {desc}"
+            line2 = f"{city_name}, {country} {flag}"
+            name = line1
+            description = line2
 
-    # -----------------------------
-    # Mínimo: linha pequena, fonte simulada menor
-    # -----------------------------
-    elif interface_mode=="minimal":
-        # colocar texto principal em description para reduzir altura
-        name = f"{temp}º - {city_name} {flag}"
-        description = ""  # vazio, ou poderia colocar mesmo texto aqui para compactar ainda mais
+        # -----------------------------
+        # Mínimo: linha pequena, fonte simulada menor
+        # -----------------------------
+        elif interface_mode=="minimal":
+            name = f"{temp}º - {city_name} {flag}"
+            description = ""  # fonte menor simulada por estar vazio
 
-    return RenderResultListAction([
-        ExtensionResultItem(
-            icon=extension.icon("icon.png"),
-            name=name,
-            description=description,
-            on_enter=None
-        )
-    ])
+        return RenderResultListAction([
+            ExtensionResultItem(
+                icon=extension.icon("icon.png"),
+                name=name,
+                description=description,
+                on_enter=None
+            )
+        ])
+
 
 if __name__=="__main__":
     UWeather().run()
