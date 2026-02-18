@@ -1,15 +1,20 @@
 {
   "manifest_version": "2",
   "required_api_version": "^2.0.0",
+
   "name": "UWeather",
-  "display_name": "UWeather - Current Weather + 3 Days",
-  "description": "Current weather and 3-day forecast with multi-provider support.",
+  "display_name": "UWeather",
+  "description": "Current weather and 3-day forecast with smart cache, automatic translation and multi-provider support.",
+
   "developer_name": "Xavier",
   "icon": "images/icon.png",
+
   "options": {
     "query_debounce": 0.1
   },
+
   "preferences": [
+
     {
       "id": "keyword",
       "type": "keyword",
@@ -17,6 +22,7 @@
       "default_value": "w",
       "description": "Type this keyword to trigger the weather search."
     },
+
     {
       "id": "provider",
       "type": "select",
@@ -27,13 +33,15 @@
         { "text": "Open-Meteo (no API key required)", "value": "openmeteo" }
       ]
     },
+
     {
       "id": "api_key",
       "type": "input",
       "name": "OpenWeather API Key",
-      "description": "Get your free API key at openweathermap.org → Sign up → API keys.",
+      "description": "Get your free API key at https://openweathermap.org → Sign up → API keys.",
       "default_value": ""
     },
+
     {
       "id": "unit",
       "type": "select",
@@ -44,6 +52,7 @@
         { "text": "Fahrenheit (°F)", "value": "imperial" }
       ]
     },
+
     {
       "id": "location_mode",
       "type": "select",
@@ -54,6 +63,7 @@
         { "text": "Manual", "value": "manual" }
       ]
     },
+
     {
       "id": "static_city",
       "type": "input",
@@ -61,20 +71,22 @@
       "description": "Enter the city name (used only when Location Mode is set to Manual).",
       "default_value": ""
     },
+
     {
       "id": "view_mode",
       "type": "select",
       "name": "Display Mode",
       "description": "Choose how detailed the weather information should appear.",
-      "default_value": 5,
+      "default_value": "5",
       "options": [
-        { "text": "Ultra Minimal", "value": 1 },
-        { "text": "Minimal", "value": 2 },
-        { "text": "Compact", "value": 3 },
-        { "text": "Full", "value": 4 },
-        { "text": "Detailed (current + forecast)", "value": 5 }
+        { "text": "Ultra Minimal", "value": "1" },
+        { "text": "Minimal", "value": "2" },
+        { "text": "Compact", "value": "3" },
+        { "text": "Full", "value": "4" },
+        { "text": "Detailed (current + forecast)", "value": "5" }
       ]
     },
+
     {
       "id": "language",
       "type": "select",
@@ -89,5 +101,6 @@
         { "text": "Français", "value": "fr" }
       ]
     }
+
   ]
 }
