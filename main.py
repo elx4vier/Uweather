@@ -15,8 +15,9 @@ from ulauncher.api.shared.action.RenderResultListAction import RenderResultListA
 # =========================
 CACHE = {}
 CACHE_TTL = 600
-DEBOUNCE_DELAY = 0.3 # Reduzido para maior fluidez
+DEBOUNCE_DELAY = 0.4
 LAST_QUERY_TIME = 0
+LAST_ACTION = None  # Armazena a última ação para evitar tela vazia durante debounce
 
 # =========================
 # ⚡ CACHE
@@ -90,9 +91,16 @@ def get_ip_location():
 # 🌤 WEATHER (OPEN-METEO)
 # =========================
 WMO = {
-    0: "Céu limpo", 1: "Principalmente limpo", 2: "Parcialmente nublado", 3: "Encoberto",
-    45: "Nevoeiro", 61: "Chuva leve", 63: "Chuva", 65: "Chuva forte",
-    71: "Neve", 95: "Trovoada"
+    0: "Clear sky",
+    1: "Mainly clear",
+    2: "Partly cloudy",
+    3: "Overcast",
+    45: "Fog",
+    61: "Light rain",
+    63: "Rain",
+    65: "Heavy rain",
+    71: "Snow",
+    95: "Thunderstorm"
 }
 
 def get_weather(lat, lon, unit):
@@ -118,7 +126,7 @@ def get_weather(lat, lon, unit):
         return None
     result = {
         "current_temp": current.get("temperature"),
-        "current_desc": WMO.get(current.get("weathercode"), "Tempo instável"),
+        "current_desc": WMO.get(current.get("weathercode")),  # sem fallback "Weather"
         "forecast": []
     }
     try:
@@ -141,68 +149,88 @@ class UWeatherExtension(Extension):
 
 class WeatherHandler(EventListener):
     def on_event(self, event, extension):
-        global LAST_QUERY_TIME
+        global LAST_QUERY_TIME, LAST_ACTION
         now = time.time()
-        
-        # ✅ RESOLUÇÃO DO VAZIO: Em vez de return None, mostramos um feedback visual
+
+        # ✅ DEBOUNCE: se for muito rápido, retorna a última ação (evita tela vazia)
         if now - LAST_QUERY_TIME < DEBOUNCE_DELAY:
-            return RenderResultListAction([
-                SmallResultItem(
-                    icon='images/icon.png',
-                    name="Buscando informações...",
-                    description="Aguarde um instante",
-                    on_enter=DoNothingAction()
-                )
-            ])
-            
+            if LAST_ACTION is not None:
+                return LAST_ACTION
+            else:
+                # Primeira execução ainda sem resultado
+                return RenderResultListAction([
+                    SmallResultItem(
+                        icon='images/icon.png',
+                        name="Aguarde...",
+                        description="Carregando clima",
+                        on_enter=DoNothingAction()
+                    )
+                ])
+
         LAST_QUERY_TIME = now
         unit = extension.preferences.get("unit", "metric")
         query = event.get_argument()
 
-        # Localização
+        # =========================
+        # 📍 LOCALIZAÇÃO
+        # =========================
         if query:
             lat, lon, city, country = geocode_city(query)
             if not lat:
-                return RenderResultListAction([
+                action = RenderResultListAction([
                     SmallResultItem(
                         icon='images/icon.png',
-                        name=f"Cidade '{query}' não encontrada",
-                        description="Tente digitar o nome novamente",
+                        name="Cidade não encontrada",
+                        description="Digite uma cidade válida",
                         on_enter=DoNothingAction()
                     )
                 ])
+                LAST_ACTION = action
+                return action
         else:
             lat, lon, city, country = get_ip_location()
             if not lat:
-                return RenderResultListAction([
+                action = RenderResultListAction([
                     SmallResultItem(
                         icon='images/icon.png',
-                        name="Localização automática falhou",
-                        description="Digite o nome de uma cidade manualmente",
+                        name="Não foi possível encontrar sua localização",
+                        description="Verifique sua conexão com a internet",
                         on_enter=DoNothingAction()
                     )
                 ])
+                LAST_ACTION = action
+                return action
 
-        # Clima
+        # =========================
+        # 🌤 WEATHER
+        # =========================
         weather = get_weather(lat, lon, unit)
         if not weather:
-            return RenderResultListAction([
+            action = RenderResultListAction([
                 SmallResultItem(
                     icon='images/icon.png',
-                    name="Erro na API de Clima",
-                    description="Verifique sua conexão ou tente mais tarde",
+                    name="Erro ao buscar clima",
+                    description="Tente novamente em instantes",
                     on_enter=DoNothingAction()
                 )
             ])
+            LAST_ACTION = action
+            return action
 
         symbol = "°C" if unit == "metric" else "°F"
         flag = country_flag(country)
-        
-        first_line = f"{weather['current_temp']}{symbol} - {weather['current_desc']}"
-        desc = f"{first_line}\nPróximos dias: {' | '.join(weather['forecast'])}"
 
-        # ✅ Retorno final garantido
-        return RenderResultListAction([
+        if weather["current_desc"]:
+            first_line = f"{weather['current_temp']}{symbol} - {weather['current_desc']}"
+        else:
+            first_line = f"{weather['current_temp']}{symbol}"
+
+        desc = (
+            f"{first_line}\n"
+            f"Próximos dias: {' | '.join(weather['forecast'])}"
+        )
+
+        action = RenderResultListAction([
             ExtensionResultItem(
                 icon='images/icon.png',
                 name=f"{flag} {city}, {country}",
@@ -210,6 +238,8 @@ class WeatherHandler(EventListener):
                 on_enter=DoNothingAction()
             )
         ])
+        LAST_ACTION = action
+        return action
 
 if __name__ == "__main__":
     UWeatherExtension().run()
