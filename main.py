@@ -2,7 +2,6 @@ import json
 import urllib.request
 import urllib.parse
 import time
-import traceback
 from ulauncher.api.client.EventListener import EventListener
 from ulauncher.api.client.Extension import Extension
 from ulauncher.api.shared.event import KeywordQueryEvent
@@ -15,10 +14,12 @@ from ulauncher.api.shared.action.RenderResultListAction import RenderResultListA
 # ⚡ CONFIG
 # =========================
 CACHE = {}
-CACHE_TTL = 600  # 10 min
+CACHE_TTL = 600
+DEBOUNCE_DELAY = 0.3 # Reduzido para maior fluidez
+LAST_QUERY_TIME = 0
 
 # =========================
-# ⚡ CACHE SIMPLES
+# ⚡ CACHE
 # =========================
 def get_cache(key):
     if key in CACHE and time.time() - CACHE[key]["time"] < CACHE_TTL:
@@ -29,225 +30,186 @@ def set_cache(key, data):
     CACHE[key] = {"time": time.time(), "data": data}
 
 # =========================
-# 🏳 BANDEIRA
+# 🏳 COUNTRY FLAG
 # =========================
 def country_flag(code):
-    if not code or len(code) != 2:
+    if not code:
         return ""
-    return "".join(chr(127397 + ord(c.upper())) for c in code)
+    return "".join(chr(127397 + ord(c)) for c in code.upper())
 
 # =========================
-# 🌐 GET JSON COM TRATAMENTO
+# 🌐 REQUEST
 # =========================
 def get_json(url):
     try:
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": "Ulauncher-Weather/1.0 (compatible)"}
-        )
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            return json.loads(resp.read().decode('utf-8'))
-    except Exception:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            return json.loads(response.read().decode())
+    except:
         return None
 
 # =========================
-# 📍 GEOCODE
+# 📍 GEOLOCATION
 # =========================
 def geocode_city(city):
-    city = city.strip()
-    if not city:
-        return None, None, None, None
-
     cache_key = f"geo-{city.lower()}"
     cached = get_cache(cache_key)
     if cached:
         return cached
-
-    try:
-        url = f"https://geocoding-api.open-meteo.com/v1/search?name={urllib.parse.quote(city)}&count=1&language=pt"
-        data = get_json(url)
-        if data and isinstance(data, dict) and data.get("results"):
-            r = data["results"][0]
-            result = (
-                r.get("latitude"),
-                r.get("longitude"),
-                r.get("name"),
-                r.get("country_code", "")
-            )
-            if result[0] is not None and result[1] is not None:
-                set_cache(cache_key, result)
-                return result
-    except Exception:
-        pass
-
+    url = f"https://geocoding-api.open-meteo.com/v1/search?name={urllib.parse.quote(city)}&count=1"
+    data = get_json(url)
+    if data and data.get("results"):
+        r = data["results"][0]
+        result = (
+            r["latitude"],
+            r["longitude"],
+            r["name"],
+            r.get("country_code", "")
+        )
+        set_cache(cache_key, result)
+        return result
     return None, None, None, None
 
-# =========================
-# 📍 IP LOCATION
-# =========================
 def get_ip_location():
-    cached = get_cache("ip-loc")
+    cached = get_cache("ip-location")
     if cached:
         return cached
-
-    try:
-        data = get_json("http://ip-api.com/json/")
-        if data and data.get("status") == "success":
-            result = (
-                data.get("lat"),
-                data.get("lon"),
-                data.get("city"),
-                data.get("countryCode")
-            )
-            if result[0] is not None:
-                set_cache("ip-loc", result)
-                return result
-    except Exception:
-        pass
+    data = get_json("http://ip-api.com/json/")
+    if data and data.get("status") == "success":
+        result = (
+            data["lat"],
+            data["lon"],
+            data["city"],
+            data["countryCode"]
+        )
+        set_cache("ip-location", result)
+        return result
     return None, None, None, None
 
 # =========================
-# 🌤 WEATHER
+# 🌤 WEATHER (OPEN-METEO)
 # =========================
-WMO_PT = {
-    0: "Céu claro",
-    1: "Predominante claro",
-    2: "Parcialmente nublado",
-    3: "Nublado",
-    45: "Nevoeiro",
-    48: "Nevoeiro denso",
-    51: "Garoa leve",
-    61: "Chuva leve",
-    63: "Chuva",
-    65: "Chuva forte",
-    71: "Neve leve",
-    73: "Neve",
-    95: "Tempestade",
-    # ... pode adicionar mais se quiser
+WMO = {
+    0: "Céu limpo", 1: "Principalmente limpo", 2: "Parcialmente nublado", 3: "Encoberto",
+    45: "Nevoeiro", 61: "Chuva leve", 63: "Chuva", 65: "Chuva forte",
+    71: "Neve", 95: "Trovoada"
 }
 
 def get_weather(lat, lon, unit):
-    if lat is None or lon is None:
-        return None
-
-    cache_key = f"wx-{lat:.4f}-{lon:.4f}-{unit}"
+    cache_key = f"weather-{lat}-{lon}-{unit}"
     cached = get_cache(cache_key)
     if cached:
         return cached
-
-    try:
-        temp_unit = "celsius" if unit == "metric" else "fahrenheit"
-        url = (
-            f"https://api.open-meteo.com/v1/forecast?"
-            f"latitude={lat}&longitude={lon}"
-            f"&current_weather=true"
-            f"&daily=temperature_2m_max,temperature_2m_min"
-            f"&temperature_unit={temp_unit}&timezone=auto"
-        )
-        data = get_json(url)
-        if not data or "current_weather" not in data:
-            return None
-
-        current = data["current_weather"]
-        daily = data.get("daily", {})
-
-        desc = WMO_PT.get(current.get("weathercode"), "Desconhecido")
-
-        forecast = []
-        temps_max = daily.get("temperature_2m_max", [])
-        temps_min = daily.get("temperature_2m_min", [])
-        for i in range(1, min(4, len(temps_max))):
-            forecast.append(f"{temps_max[i]:.0f} / {temps_min[i]:.0f}")
-
-        result = {
-            "temp": current.get("temperature"),
-            "desc": desc,
-            "forecast": forecast
-        }
-        set_cache(cache_key, result)
-        return result
-    except Exception:
+    temp_unit = "celsius" if unit == "metric" else "fahrenheit"
+    url = (
+        f"https://api.open-meteo.com/v1/forecast?"
+        f"latitude={lat}&longitude={lon}"
+        f"&current_weather=true"
+        f"&daily=temperature_2m_max,temperature_2m_min"
+        f"&temperature_unit={temp_unit}"
+        f"&timezone=auto"
+    )
+    data = get_json(url)
+    if not data:
         return None
+    current = data.get("current_weather")
+    daily = data.get("daily")
+    if not current or not daily:
+        return None
+    result = {
+        "current_temp": current.get("temperature"),
+        "current_desc": WMO.get(current.get("weathercode"), "Tempo instável"),
+        "forecast": []
+    }
+    try:
+        for i in range(1, 4):
+            result["forecast"].append(
+                f"{daily['temperature_2m_max'][i]} / {daily['temperature_2m_min'][i]}"
+            )
+    except:
+        pass
+    set_cache(cache_key, result)
+    return result
 
 # =========================
-# 🚀 EXTENSÃO PRINCIPAL
+# 🚀 EXTENSION
 # =========================
-class WeatherExt(Extension):
+class UWeatherExtension(Extension):
     def __init__(self):
         super().__init__()
         self.subscribe(KeywordQueryEvent, WeatherHandler())
 
 class WeatherHandler(EventListener):
     def on_event(self, event, extension):
-        try:
-            unit = extension.preferences.get("unit", "metric") or "metric"
-            query = (event.get_argument() or "").strip()
-
-            # 1. Sem query → IP
-            if not query:
-                lat, lon, city, country = get_ip_location()
-                source = "Sua localização (IP)"
-            else:
-                lat, lon, city, country = geocode_city(query)
-                source = f"Pesquisa: {query}"
-
-            if lat is None or lon is None:
-                return RenderResultListAction([
-                    SmallResultItem(
-                        icon='images/icon.png',
-                        name="Localização não encontrada",
-                        description=f"Não achei '{query or 'sua localização'}'. Tente outra cidade.",
-                        on_enter=DoNothingAction()
-                    )
-                ])
-
-            # 2. Busca clima
-            weather = get_weather(lat, lon, unit)
-            if weather is None or weather.get("temp") is None:
-                return RenderResultListAction([
-                    SmallResultItem(
-                        icon='images/icon.png',
-                        name="Falha ao obter o clima",
-                        description="Problema na API do Open-Meteo. Tente mais tarde.",
-                        on_enter=DoNothingAction()
-                    )
-                ])
-
-            # 3. Monta resultado
-            symbol = "°C" if unit == "metric" else "°F"
-            flag = country_flag(country)
-            first = f"{weather['temp']}{symbol}"
-            if weather['desc']:
-                first += f" – {weather['desc']}"
-
-            forecast_str = " | ".join(weather['forecast']) if weather['forecast'] else "—"
-            desc = f"{first}\nPróximos 3 dias: {forecast_str}"
-
-            return RenderResultListAction([
-                ExtensionResultItem(
-                    icon='images/icon.png',
-                    name=f"{flag} {city}, {country or '?'}",
-                    description=desc,
-                    on_enter=DoNothingAction()
-                )
-            ])
-
-        except Exception as ex:
-            # ÚLTIMO RECURSO: mostra erro no popup + log
-            error_text = str(ex)
-            try:
-                print("WEATHER EXT ERRO:", error_text, traceback.format_exc())
-            except:
-                pass
-
+        global LAST_QUERY_TIME
+        now = time.time()
+        
+        # ✅ RESOLUÇÃO DO VAZIO: Em vez de return None, mostramos um feedback visual
+        if now - LAST_QUERY_TIME < DEBOUNCE_DELAY:
             return RenderResultListAction([
                 SmallResultItem(
                     icon='images/icon.png',
-                    name="Erro interno na extensão",
-                    description=f"{error_text[:120]}... (veja terminal)",
+                    name="Buscando informações...",
+                    description="Aguarde um instante",
+                    on_enter=DoNothingAction()
+                )
+            ])
+            
+        LAST_QUERY_TIME = now
+        unit = extension.preferences.get("unit", "metric")
+        query = event.get_argument()
+
+        # Localização
+        if query:
+            lat, lon, city, country = geocode_city(query)
+            if not lat:
+                return RenderResultListAction([
+                    SmallResultItem(
+                        icon='images/icon.png',
+                        name=f"Cidade '{query}' não encontrada",
+                        description="Tente digitar o nome novamente",
+                        on_enter=DoNothingAction()
+                    )
+                ])
+        else:
+            lat, lon, city, country = get_ip_location()
+            if not lat:
+                return RenderResultListAction([
+                    SmallResultItem(
+                        icon='images/icon.png',
+                        name="Localização automática falhou",
+                        description="Digite o nome de uma cidade manualmente",
+                        on_enter=DoNothingAction()
+                    )
+                ])
+
+        # Clima
+        weather = get_weather(lat, lon, unit)
+        if not weather:
+            return RenderResultListAction([
+                SmallResultItem(
+                    icon='images/icon.png',
+                    name="Erro na API de Clima",
+                    description="Verifique sua conexão ou tente mais tarde",
                     on_enter=DoNothingAction()
                 )
             ])
 
+        symbol = "°C" if unit == "metric" else "°F"
+        flag = country_flag(country)
+        
+        first_line = f"{weather['current_temp']}{symbol} - {weather['current_desc']}"
+        desc = f"{first_line}\nPróximos dias: {' | '.join(weather['forecast'])}"
+
+        # ✅ Retorno final garantido
+        return RenderResultListAction([
+            ExtensionResultItem(
+                icon='images/icon.png',
+                name=f"{flag} {city}, {country}",
+                description=desc,
+                on_enter=DoNothingAction()
+            )
+        ])
+
 if __name__ == "__main__":
-    WeatherExt().run()
+    UWeatherExtension().run()
