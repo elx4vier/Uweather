@@ -27,10 +27,10 @@
       "id": "provider",
       "type": "select",
       "name": "Weather Provider",
-      "default_value": "open-meteo",
+      "default_value": "openweather",
       "options": [
-        { "text": "Open-Meteo (no API key required)", "value": "open-meteo" },
-        { "text": "OpenWeather (requires API key)", "value": "openweather" }
+        { "text": "OpenWeather (requires API key)", "value": "openweather" },
+        { "text": "Open-Meteo (no API key required)", "value": "open-meteo" }
       ]
     },
 
@@ -38,7 +38,7 @@
       "id": "api_key",
       "type": "input",
       "name": "OpenWeather API Key",
-      "description": "Required only if OpenWeather is selected.",
+      "description": "Required only if OpenWeather is selected. Get it at https://home.openweathermap.org/api_keys",
       "default_value": ""
     },
 
@@ -78,18 +78,9 @@
       "name": "Interface Display",
       "default_value": "complete",
       "options": [
-        {
-          "text": "Complete – Full info with city, country code, flag, current temp, condition, forecast for tomorrow and day after (with emoji)",
-          "value": "complete"
-        },
-        {
-          "text": "Essential – Current temp, condition, city, country code and flag",
-          "value": "essential"
-        },
-        {
-          "text": "Minimal – One line: temp and city with flag (no decimals)",
-          "value": "minimal"
-        }
+        { "text": "Completo", "value": "complete" },
+        { "text": "Essencial", "value": "essential" },
+        { "text": "Mínimo", "value": "minimal" }
       ]
     }
 
