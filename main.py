@@ -155,7 +155,6 @@ class WeatherService:
     def fetch_weather_openweather(session, lat, lon, api_key, unit="c"):
         try:
             u = "metric" if unit == "c" else "imperial"
-            # Usando API 2.5 Weather + Forecast para manter compatibilidade com chaves gratuitas
             r_curr = session.get(f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={api_key}&units={u}", timeout=5)
             data_curr = r_curr.json()
             
@@ -163,13 +162,11 @@ class WeatherService:
                 logger.error(f"OWM Error: {data_curr.get('message')}")
                 return None
 
-            # Forecast para pegar min/max de amanhã (índice 8 costuma ser ~24h depois em passos de 3h)
             r_fore = session.get(f"https://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={api_key}&units={u}", timeout=5)
             data_fore = r_fore.json()
             
             forecast = []
             if r_fore.status_code == 200 and "list" in data_fore:
-                # Pegamos o primeiro item da lista (próximo período) como forecast simples
                 f_day = data_fore["list"][8] if len(data_fore["list"]) > 8 else data_fore["list"][0]
                 forecast.append({
                     "max": int(f_day["main"]["temp_max"]),
@@ -205,16 +202,12 @@ class UWeather(Extension):
         return path if os.path.exists(path) else os.path.join(self.base_path, "images", "icon.png")
 
     def get_weather_data(self, lat, lon, unit):
-        """ESTRITAMENTE seleciona o provedor das preferências"""
-        api_choice = (self.preferences.get("weather_api") or "open-meteo").lower()
-        
-        if api_choice == "openweather":
-            api_key = self.preferences.get("weather_api_key")
+        provider = (self.preferences.get("provider") or "open-meteo").lower()
+        if provider == "openweather":
+            api_key = self.preferences.get("api_key")
             if not api_key:
                 return {"error": "API Key ausente"}
             return WeatherService.fetch_weather_openweather(self.session, lat, lon, api_key, unit)
-        
-        # Fallback apenas se a escolha for explicitamente open-meteo
         return WeatherService.fetch_weather_openmeteo(self.session, lat, lon, unit)
 
     def preload_weather(self):
@@ -223,8 +216,8 @@ class UWeather(Extension):
             unit = (self.preferences.get("unit") or "c").lower()
             weather = self.get_weather_data(geo["latitude"], geo["longitude"], unit)
             if weather and "error" not in weather:
-                api_choice = (self.preferences.get("weather_api") or "open-meteo").lower()
-                self.cache[f"auto_{api_choice}_{unit}"] = {"geo": geo, "data": weather, "ts": time.time()}
+                provider = (self.preferences.get("provider") or "open-meteo").lower()
+                self.cache[f"auto_{provider}_{unit}"] = {"geo": geo, "data": weather, "ts": time.time()}
                 save_cache(self.base_path, self.cache)
 
 # ==============================
@@ -235,29 +228,29 @@ class WeatherListener(EventListener):
         unit = (extension.preferences.get("unit") or "c").lower()
         mode = (extension.preferences.get("location_mode") or "auto").lower()
         interface = (extension.preferences.get("interface_mode") or "complete").lower()
-        api_choice = (extension.preferences.get("weather_api") or "open-meteo").lower()
+        provider = (extension.preferences.get("provider") or "open-meteo").lower()
         query = (event.get_argument() or "").strip()
         
         geo = None
+        key = None
         
-        # Chave de cache agora é segregada por API obrigatoriamente
         if not query and mode == "auto":
-            key = f"auto_{api_choice}_{unit}"
+            key = f"auto_{provider}_{unit}"
             if key in extension.cache and time.time() - extension.cache[key]["ts"] < CACHE_TTL:
                 return self.render(extension.cache[key], extension, interface)
             geo = WeatherService.fetch_location(extension.session)
         elif query or mode == "manual":
             city_name = query if query else extension.preferences.get("static_location") or ""
-            key = f"{city_name.lower()}_{api_choice}_{unit}"
+            key = f"{city_name.lower()}_{provider}_{unit}"
             if key in extension.cache and time.time() - extension.cache[key]["ts"] < CACHE_TTL:
                 return self.render(extension.cache[key], extension, interface)
             
-            # Geocoding (Sempre via Open-Meteo Geocoding que é gratuito e sem key)
             try:
                 r = extension.session.get(f"https://geocoding-api.open-meteo.com/v1/search?name={city_name}&count=1")
                 res = r.json().get("results")
                 if res:
-                    geo = {"city": res[0]["name"], "country": res[0].get("country_code", "BR"), "latitude": res[0]["latitude"], "longitude": res[0]["longitude"]}
+                    geo = {"city": res[0]["name"], "country": res[0].get("country_code", "BR"),
+                           "latitude": res[0]["latitude"], "longitude": res[0]["longitude"]}
             except: pass
 
         if geo:
@@ -265,14 +258,24 @@ class WeatherListener(EventListener):
             
             if weather:
                 if isinstance(weather, dict) and "error" in weather:
-                    return RenderResultListAction([ExtensionResultItem(icon=extension.icon("icon.png"), name=weather["error"], description="Verifique as configurações da extensão", on_enter=None)])
+                    return RenderResultListAction([
+                        ExtensionResultItem(icon=extension.icon("icon.png"),
+                                            name=weather["error"],
+                                            description="Verifique as configurações da extensão",
+                                            on_enter=None)
+                    ])
                 
                 data = {"geo": geo, "data": weather, "ts": time.time()}
                 extension.cache[key] = data
                 save_cache(extension.base_path, extension.cache)
                 return self.render(data, extension, interface)
 
-        return RenderResultListAction([ExtensionResultItem(icon=extension.icon("icon.png"), name="Localização ou dados não disponíveis", description=f"Provedor atual: {api_choice}", on_enter=None)])
+        return RenderResultListAction([
+            ExtensionResultItem(icon=extension.icon("icon.png"),
+                                name="Localização ou dados não disponíveis",
+                                description=f"Provedor atual: {provider}",
+                                on_enter=None)
+        ])
 
     def render(self, cached_item, extension, interface_mode):
         geo = cached_item["geo"]
