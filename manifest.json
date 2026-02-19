@@ -29,8 +29,7 @@
       "options": [
         { "text": "Celsius (°C)", "value": "C" },
         { "text": "Fahrenheit (°F)", "value": "F" }
-      ],
-      "description": "Choose the temperature unit to display"
+      ]
     },
 
     {
@@ -41,8 +40,7 @@
       "options": [
         { "text": "Automatic", "value": "auto" },
         { "text": "Manual", "value": "manual" }
-      ],
-      "description": "Choose whether to detect your location automatically or manually"
+      ]
     },
 
     {
@@ -62,8 +60,7 @@
         { "text": "Complete", "value": "complete" },
         { "text": "Essential", "value": "essential" },
         { "text": "Minimal", "value": "minimal" }
-      ],
-      "description": "Choose the level of detail shown in the interface"
+      ]
     }
   ]
 }
