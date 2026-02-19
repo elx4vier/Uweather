@@ -17,9 +17,8 @@
     {
       "id": "keyword",
       "type": "keyword",
-      "name": "Keyword",
-      "default_value": "w",
-      "description": "Type this keyword to trigger the weather search."
+      "name": "UWeather Keyword",
+      "default_value": "w"
     },
 
     {
@@ -30,7 +29,8 @@
       "options": [
         { "text": "Celsius (°C)", "value": "C" },
         { "text": "Fahrenheit (°F)", "value": "F" }
-      ]
+      ],
+      "description": "Choose the temperature unit to display"
     },
 
     {
@@ -41,14 +41,15 @@
       "options": [
         { "text": "Automatic", "value": "auto" },
         { "text": "Manual", "value": "manual" }
-      ]
+      ],
+      "description": "Choose whether to detect your location automatically or manually"
     },
 
     {
       "id": "static_location",
       "type": "input",
       "name": "Static Location",
-      "description": "Used only if Location Mode is Manual. Example: São Luís, BR",
+      "description": "Used only in Manual mode. Enter only the city name. Examples: Prague, Lisbon, São Paulo",
       "default_value": ""
     },
 
@@ -58,10 +59,11 @@
       "name": "Interface Display",
       "default_value": "complete",
       "options": [
-        { "text": "Completo", "value": "complete" },
-        { "text": "Essencial", "value": "essential" },
-        { "text": "Mínimo", "value": "minimal" }
-      ]
+        { "text": "Complete", "value": "complete" },
+        { "text": "Essential", "value": "essential" },
+        { "text": "Minimal", "value": "minimal" }
+      ],
+      "description": "Choose the level of detail shown in the interface"
     }
   ]
 }
