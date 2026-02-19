@@ -154,17 +154,25 @@ class UWeather(Extension):
 
     def get_weather_data(self, lat, lon, unit):
         provider=(self.preferences.get("provider") or "open-meteo").lower()
-        if provider=="openweather":
-            api_key=self.preferences.get("api_key")
-            if not api_key: return {"error":"API Key ausente"}
         return WeatherService.fetch_weather_openmeteo(self.session, lat, lon, unit)
 
     def on_preferences_changed(self, key, value):
         """
-        Atualiza imediatamente e limpa cache se mudar configuração relevante.
+        Atualiza imediatamente e limpa cache relevante se mudar configuração.
         """
-        if key in ["provider","api_key","location_mode","static_location","unit"]:
+        provider = (self.preferences.get("provider") or "open-meteo").lower()
+        unit = (self.preferences.get("unit") or "c").lower()
+        mode = (self.preferences.get("location_mode") or "auto").lower()
+
+        if key in ["provider","api_key","unit","location_mode"]:
             self.cache = {}
+            save_cache(self.base_path,self.cache)
+            ThreadPoolExecutor(max_workers=1).submit(self.update_location)
+
+        elif key=="static_location" and mode=="manual":
+            # limpa apenas cache manual
+            manual_key = f"manual_{provider}_{unit}"
+            if manual_key in self.cache: del self.cache[manual_key]
             save_cache(self.base_path,self.cache)
             ThreadPoolExecutor(max_workers=1).submit(self.update_location)
 
@@ -211,29 +219,47 @@ class UWeather(Extension):
                     logger.error(f"Erro localização manual: {e}")
 
 # ==============================
+# HELPER: CHECAR SE A CIDADE FIXA MUDOU
+# ==============================
+def check_manual_update(extension):
+    mode = (extension.preferences.get("location_mode") or "auto").lower()
+    if mode != "manual": return
+
+    unit = (extension.preferences.get("unit") or "c").lower()
+    provider = (extension.preferences.get("provider") or "open-meteo").lower()
+    manual_key = f"manual_{provider}_{unit}"
+
+    current_city = (extension.preferences.get("static_location") or "").strip()
+    cached_city = extension.cache.get(manual_key, {}).get("geo", {}).get("city", "")
+
+    if current_city and current_city != cached_city:
+        if manual_key in extension.cache: del extension.cache[manual_key]
+        save_cache(extension.base_path, extension.cache)
+        extension.update_location()
+
+# ==============================
 # LISTENER
 # ==============================
 class WeatherListener(EventListener):
     def on_event(self,event,extension):
+        check_manual_update(extension)  # <-- garante atualização da cidade fixa
+
         unit=(extension.preferences.get("unit") or "c").lower()
         mode=(extension.preferences.get("location_mode") or "auto").lower()
         provider=(extension.preferences.get("provider") or "open-meteo").lower()
         interface=(extension.preferences.get("interface_mode") or "complete").lower()
         query=(event.get_argument() or "").strip()
 
-        # chave correta para cache
         key = f"{mode}_{provider}_{unit}"
 
         if not query:
-            # sem query -> auto/manual
             if key in extension.cache and time.time()-extension.cache[key]["ts"]<CACHE_TTL:
                 return self.render(extension.cache[key],extension,interface)
             else:
                 extension.update_location()
                 if key in extension.cache:
                     return self.render(extension.cache[key],extension,interface)
-
-        else:  # busca manual
+        else:
             city_query = query
             country_filter = None
             if "," in city_query:
