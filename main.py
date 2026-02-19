@@ -4,6 +4,7 @@ import time
 import os
 import json
 import locale
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -100,7 +101,8 @@ class WeatherService:
             return {
                 "current": {
                     "temp": temp,
-                    "desc": OPEN_METEO_CODES.get(current.get("weathercode", 0), "desconhecido").lower()
+                    "desc": OPEN_METEO_CODES.get(current.get("weathercode", 0), "desconhecido").lower(),
+                    "weathercode": current.get("weathercode", 0)
                 },
                 "forecast": forecast
             }
@@ -133,6 +135,49 @@ class UWeather(Extension):
         path = os.path.join(self.base_path, "images", filename)
         return path if os.path.exists(path) else os.path.join(self.base_path, "images", "icon.png")
 
+    # ===== NOVO: função de ícone baseada em clima e horário =====
+    def weather_icon(self, weather_code, is_night=False):
+        code_map = {
+            0: "weather-clear",
+            1: "weather-few-clouds-wind",
+            2: "weather-many-clouds",
+            3: "weather-many-clouds",
+            45: "weather-mist",
+            48: "weather-mist",
+            51: "weather-showers",
+            53: "weather-showers",
+            55: "weather-showers",
+            56: "weather-showers",
+            57: "weather-showers",
+            61: "weather-showers",
+            63: "weather-showers",
+            65: "weather-showers",
+            66: "weather-showers",
+            67: "weather-showers",
+            71: "weather-snow-scattered",
+            73: "weather-snow-scattered",
+            75: "weather-snow-scattered",
+            77: "weather-snow",
+            80: "weather-showers",
+            81: "weather-showers",
+            82: "weather-showers",
+            85: "weather-snow",
+            86: "weather-snow",
+            95: "weather-storm",
+            96: "weather-storm",
+            99: "weather-storm",
+        }
+        base_name = code_map.get(weather_code, "weather-mist")
+        suffix = "night" if is_night else "day"
+        filename = f"{base_name}-{suffix}.svg"
+
+        path = os.path.join(self.base_path, "images", filename)
+        if os.path.exists(path):
+            return filename
+        neutral_file = f"{base_name}.svg"
+        return neutral_file if os.path.exists(os.path.join(self.base_path, "images", neutral_file)) else "icon.png"
+    # ===============================================================
+
     def update_location(self):
         mode = (self.preferences.get("location_mode") or "auto").lower()
         unit = (self.preferences.get("unit") or "c").lower()
@@ -158,7 +203,6 @@ class UWeather(Extension):
         if geo:
             weather = WeatherService.fetch_weather(self.session, geo["latitude"], geo["longitude"], unit)
             if weather:
-                # O segredo: salvar os parâmetros usados para gerar esse cache
                 self.cache = {
                     "params": {"mode": mode, "unit": unit, "city": static_city},
                     "data": {"geo": geo, "weather": weather, "ts": time.time()}
@@ -169,13 +213,11 @@ class UWeather(Extension):
 
 class PreferencesUpdateListener(EventListener):
     def on_event(self, event, extension):
-        # Limpeza agressiva
         extension.cache = {}
         path = os.path.join(extension.base_path, CACHE_FILE)
         if os.path.exists(path):
             try: os.remove(path)
             except: pass
-        # Dispara o update síncrono para garantir que a próxima query já tenha dados
         extension.update_location()
 
 class WeatherListener(EventListener):
@@ -190,14 +232,12 @@ class WeatherListener(EventListener):
             return RenderResultListAction([ExtensionResultItem(icon=extension.icon("error.png"), name="Localização não encontrada", on_enter=None)])
 
         if not query:
-            # VALIDAÇÃO DE CACHE: Se os parâmetros mudaram, o cache é inválido
             cache_valid = False
             if "params" in extension.cache:
                 p = extension.cache["params"]
                 if p.get("mode") == mode and p.get("unit") == unit and p.get("city") == static_city:
                     cache_valid = True
 
-            # Se inválido ou expirado, atualiza agora
             if not cache_valid or (time.time() - extension.cache["data"]["ts"] > CACHE_TTL):
                 success = extension.update_location()
                 if not success:
@@ -221,7 +261,6 @@ class WeatherListener(EventListener):
                 if weather:
                     geo = {"city": res.get("name"), "state": res.get("admin1", ""), "country": res.get("country_code", "BR"),
                            "latitude": res.get("latitude"), "longitude": res.get("longitude")}
-                    # Criar estrutura compatível com o render
                     item_data = {"geo": geo, "weather": weather}
                     items.append(self.render(item_data, extension, interface, return_item=True))
             return RenderResultListAction(items)
@@ -235,6 +274,11 @@ class WeatherListener(EventListener):
         temp, desc = weather["current"]["temp"], weather["current"]["desc"].lower()
         flag = country_flag(geo["country"])
         
+        now_hour = datetime.now().hour
+        is_night = now_hour < 6 or now_hour >= 18
+        weather_code = weather["current"].get("weathercode", 0)
+        icon_file = extension.weather_icon(weather_code, is_night)
+
         state_info = f", {geo['state']}" if geo['state'] else ""
         loc_line = f"{geo['city']}{state_info} {flag}"
 
@@ -242,21 +286,21 @@ class WeatherListener(EventListener):
             f = weather.get("forecast", [])
             line3 = f"Amanhã: {f[1]['min']}º / {f[1]['max']}º | Depois: {f[2]['min']}º / {f[2]['max']}º" if len(f) >= 3 else ""
             item = ExtensionResultItem(
-                icon=extension.icon("icon.png"), 
+                icon=extension.icon(icon_file), 
                 name=loc_line, 
                 description=f"{temp}º, {desc}\n{line3}", 
                 on_enter=OpenUrlAction(url)
             )
         elif interface_mode == "essential":
             item = ExtensionResultItem(
-                icon=extension.icon("icon.png"), 
+                icon=extension.icon(icon_file), 
                 name=f"{temp}º, {desc}", 
                 description=loc_line, 
                 on_enter=OpenUrlAction(url)
             )
         else:
             item = ExtensionSmallResultItem(
-                icon=extension.icon("icon.png"), 
+                icon=extension.icon(icon_file), 
                 name=f"{temp}º – {loc_line} ({desc})", 
                 on_enter=OpenUrlAction(url)
             )
