@@ -15,7 +15,6 @@ from ulauncher.api.shared.item.ExtensionResultItem import ExtensionResultItem
 from ulauncher.api.shared.item.ExtensionSmallResultItem import ExtensionSmallResultItem
 from ulauncher.api.shared.action.RenderResultListAction import RenderResultListAction
 from ulauncher.api.shared.action.OpenUrlAction import OpenUrlAction
-from ulauncher.api.shared.action.SetUserQueryAction import SetUserQueryAction
 
 logger = logging.getLogger(__name__)
 
@@ -137,68 +136,74 @@ class UWeather(Extension):
     def update_location(self):
         mode = (self.preferences.get("location_mode") or "auto").lower()
         unit = (self.preferences.get("unit") or "c").lower()
+        static_city = (self.preferences.get("static_location") or "").strip()
         geo = None
 
         if mode == "auto":
             geo = WeatherService.fetch_location(self.session)
         else:
-            city = (self.preferences.get("static_location") or "").strip()
-            if city:
-                try:
-                    r = self.session.get("https://geocoding-api.open-meteo.com/v1/search",
-                                        params={"name": city, "count": 1}, timeout=5)
-                    res = r.json().get("results", [])
-                    if res:
-                        geo = {
-                            "city": res[0].get("name"), "state": res[0].get("admin1", ""),
-                            "country": res[0].get("country_code", "BR"),
-                            "latitude": res[0].get("latitude"), "longitude": res[0].get("longitude")
-                        }
-                except: pass
+            if not static_city: return False
+            try:
+                r = self.session.get("https://geocoding-api.open-meteo.com/v1/search",
+                                    params={"name": static_city, "count": 1}, timeout=5)
+                res = r.json().get("results", [])
+                if res:
+                    geo = {
+                        "city": res[0].get("name"), "state": res[0].get("admin1", ""),
+                        "country": res[0].get("country_code", "BR"),
+                        "latitude": res[0].get("latitude"), "longitude": res[0].get("longitude")
+                    }
+            except: pass
 
         if geo:
             weather = WeatherService.fetch_weather(self.session, geo["latitude"], geo["longitude"], unit)
             if weather:
-                self.cache[f"{mode}_{unit}"] = {"geo": geo, "data": weather, "ts": time.time()}
+                # O segredo: salvar os parâmetros usados para gerar esse cache
+                self.cache = {
+                    "params": {"mode": mode, "unit": unit, "city": static_city},
+                    "data": {"geo": geo, "weather": weather, "ts": time.time()}
+                }
                 self.save_cache()
                 return True
         return False
 
 class PreferencesUpdateListener(EventListener):
     def on_event(self, event, extension):
+        # Limpeza agressiva
         extension.cache = {}
         path = os.path.join(extension.base_path, CACHE_FILE)
         if os.path.exists(path):
             try: os.remove(path)
             except: pass
-        # Executa o update e limpa a interface do Ulauncher para forçar o usuário a ver o novo estado
-        ThreadPoolExecutor(max_workers=1).submit(extension.update_location)
+        # Dispara o update síncrono para garantir que a próxima query já tenha dados
+        extension.update_location()
 
 class WeatherListener(EventListener):
     def on_event(self, event, extension):
         unit = (extension.preferences.get("unit") or "c").lower()
         mode = (extension.preferences.get("location_mode") or "auto").lower()
         interface = (extension.preferences.get("interface_mode") or "complete").lower()
+        static_city = (extension.preferences.get("static_location") or "").strip()
         query = (event.get_argument() or "").strip()
 
-        if mode != "auto" and not (extension.preferences.get("static_location") or "").strip():
+        if mode == "manual" and not static_city:
             return RenderResultListAction([ExtensionResultItem(icon=extension.icon("error.png"), name="Localização não encontrada", on_enter=None)])
 
-        key = f"{mode}_{unit}"
-
         if not query:
-            # Se não houver nada no cache, tentamos buscar
-            if key not in extension.cache:
-                extension.update_location()
-                # Se após tentar buscar ainda não tiver, mostramos carregando
-                if key not in extension.cache:
+            # VALIDAÇÃO DE CACHE: Se os parâmetros mudaram, o cache é inválido
+            cache_valid = False
+            if "params" in extension.cache:
+                p = extension.cache["params"]
+                if p.get("mode") == mode and p.get("unit") == unit and p.get("city") == static_city:
+                    cache_valid = True
+
+            # Se inválido ou expirado, atualiza agora
+            if not cache_valid or (time.time() - extension.cache["data"]["ts"] > CACHE_TTL):
+                success = extension.update_location()
+                if not success:
                     return RenderResultListAction([ExtensionResultItem(icon=extension.icon("icon.png"), name="Buscando informações meteorológicas...", on_enter=None)])
             
-            # Se o cache estiver expirado, atualiza em background para a próxima vez
-            if (time.time() - extension.cache[key]["ts"] > CACHE_TTL):
-                ThreadPoolExecutor(max_workers=1).submit(extension.update_location)
-
-            return self.render(extension.cache[key], extension, interface)
+            return self.render(extension.cache["data"], extension, interface)
 
         return self.search_city_weather(query, extension, unit, interface)
 
@@ -216,13 +221,15 @@ class WeatherListener(EventListener):
                 if weather:
                     geo = {"city": res.get("name"), "state": res.get("admin1", ""), "country": res.get("country_code", "BR"),
                            "latitude": res.get("latitude"), "longitude": res.get("longitude")}
-                    items.append(self.render({"geo": geo, "data": weather}, extension, interface, return_item=True))
+                    # Criar estrutura compatível com o render
+                    item_data = {"geo": geo, "weather": weather}
+                    items.append(self.render(item_data, extension, interface, return_item=True))
             return RenderResultListAction(items)
         except:
             return RenderResultListAction([ExtensionResultItem(icon=extension.icon("error.png"), name="Erro na busca", on_enter=None)])
 
     def render(self, item_data, extension, interface_mode, return_item=False):
-        geo, weather = item_data["geo"], item_data["data"]
+        geo, weather = item_data["geo"], item_data["weather"]
         lang = get_system_language()
         url = f"https://weather.com/{lang}/weather/today/l/{geo['latitude']},{geo['longitude']}"
         temp, desc = weather["current"]["temp"], weather["current"]["desc"].lower()
