@@ -146,7 +146,7 @@ class UWeather(Extension):
         self.session = create_session()
         self.base_path = os.path.dirname(os.path.abspath(__file__))
         self.cache = load_cache(self.base_path)
-        ThreadPoolExecutor(max_workers=1).submit(self.update_auto_location)
+        ThreadPoolExecutor(max_workers=1).submit(self.update_location)
 
     def icon(self, filename):
         path=os.path.join(self.base_path,"images",filename)
@@ -166,11 +166,11 @@ class UWeather(Extension):
         if key in ["provider","api_key","location_mode","static_location","unit"]:
             self.cache = {}
             save_cache(self.base_path,self.cache)
-            ThreadPoolExecutor(max_workers=1).submit(self.update_auto_location)
+            ThreadPoolExecutor(max_workers=1).submit(self.update_location)
 
-    def update_auto_location(self):
+    def update_location(self):
         """
-        Atualiza localização automática ou estática e salva no cache.
+        Atualiza localização automática ou manual (cidade fixa) e salva no cache.
         """
         mode = (self.preferences.get("location_mode") or "auto").lower()
         unit = (self.preferences.get("unit") or "c").lower()
@@ -185,13 +185,15 @@ class UWeather(Extension):
                     self.cache[key] = {"geo": geo, "data": weather, "ts": time.time()}
                     save_cache(self.base_path,self.cache)
 
-        elif mode=="static":
+        elif mode=="manual":
             city = self.preferences.get("static_location")
             if city:
                 try:
-                    r=self.session.get("https://geocoding-api.open-meteo.com/v1/search",
-                                       params={"name": city, "count":1}, timeout=5)
-                    res=r.json().get("results",[])
+                    r = self.session.get(
+                        "https://geocoding-api.open-meteo.com/v1/search",
+                        params={"name": city,"count":1}, timeout=5
+                    )
+                    res = r.json().get("results", [])
                     if res and (res[0].get("latitude") or res[0].get("lat")):
                         geo = {
                             "city": res[0].get("name"),
@@ -202,11 +204,11 @@ class UWeather(Extension):
                         }
                         weather = self.get_weather_data(geo["latitude"],geo["longitude"],unit)
                         if weather and "error" not in weather:
-                            key = f"static_{provider}_{unit}"
+                            key = f"manual_{provider}_{unit}"
                             self.cache[key] = {"geo": geo, "data": weather, "ts": time.time()}
                             save_cache(self.base_path,self.cache)
                 except Exception as e:
-                    logger.error(f"Erro localização estática: {e}")
+                    logger.error(f"Erro localização manual: {e}")
 
 # ==============================
 # LISTENER
@@ -219,13 +221,15 @@ class WeatherListener(EventListener):
         interface=(extension.preferences.get("interface_mode") or "complete").lower()
         query=(event.get_argument() or "").strip()
 
-        key=None
+        # chave correta para cache
+        key = f"{mode}_{provider}_{unit}"
+
         if not query:
-            key = f"{mode}_{provider}_{unit}"
+            # sem query -> auto/manual
             if key in extension.cache and time.time()-extension.cache[key]["ts"]<CACHE_TTL:
                 return self.render(extension.cache[key],extension,interface)
             else:
-                extension.update_auto_location()
+                extension.update_location()
                 if key in extension.cache:
                     return self.render(extension.cache[key],extension,interface)
 
@@ -237,12 +241,13 @@ class WeatherListener(EventListener):
                 city_query=parts[0]
                 if len(parts)>1: country_filter=parts[1].upper()
             try:
-                r=extension.session.get("https://geocoding-api.open-meteo.com/v1/search",
-                                       params={"name": city_query, "count":5},timeout=5)
+                r=extension.session.get(
+                    "https://geocoding-api.open-meteo.com/v1/search",
+                    params={"name": city_query, "count":5},timeout=5
+                )
                 results=r.json().get("results",[])
                 if country_filter:
                     results=[res for res in results if res.get("country_code","").upper()==country_filter]
-
                 results=[res for res in results if res.get("latitude") or res.get("lat")]
 
                 if not results:
