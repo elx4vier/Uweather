@@ -4,6 +4,7 @@ import time
 import os
 import threading
 import json
+from math import radians, sin, cos, sqrt, atan2
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -56,6 +57,15 @@ def save_cache(base_path, cache_data):
     except Exception as e:
         logger.error(f"Erro ao salvar cache: {e}")
 
+def haversine(lat1, lon1, lat2, lon2):
+    """Distância em km entre dois pontos geográficos"""
+    R = 6371
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+    a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+    return R * c
+
 # ==============================
 # OPEN-METEO CÓDIGOS
 # ==============================
@@ -107,13 +117,14 @@ class WeatherService:
         return {"city": "Nenhuma API respondeu", "region": "", "ip": "N/A", "country": "??", "provider": "Nenhuma API respondeu"}
 
     @staticmethod
-    def fetch_weather_openmeteo(session, lat, lon):
+    def fetch_weather_openmeteo(session, lat, lon, unit="c"):
         """Buscar clima no Open-Meteo"""
         try:
+            temp_unit = "fahrenheit" if unit.lower() == "f" else "celsius"
             r = session.get(
                 f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
-                "&daily=temperature_2m_max,temperature_2m_min,weathercode"
-                "&current_weather=true&timezone=auto",
+                f"&daily=temperature_2m_max,temperature_2m_min,weathercode"
+                f"&current_weather=true&timezone=auto&temperature_unit={temp_unit}",
                 timeout=5
             )
             data = r.json()
@@ -165,9 +176,10 @@ class UWeather(Extension):
             lon = geo.get("longitude")
             if lat is None or lon is None:
                 return
-            weather = WeatherService.fetch_weather_openmeteo(self.session, lat, lon)
+            unit = "c"
+            weather = WeatherService.fetch_weather_openmeteo(self.session, lat, lon, unit)
             if weather:
-                self.cache["auto"] = {"geo": geo, "data": weather, "ts": time.time()}
+                self.cache["auto"] = {"geo": geo, "data": weather, "ts": time.time(), "unit": unit}
                 save_cache(self.base_path, self.cache)
         except Exception as e:
             logger.error(f"Preload falhou: {e}")
@@ -178,11 +190,12 @@ class UWeather(Extension):
 class WeatherListener(EventListener):
     def on_event(self, event, extension):
         try:
-            # =========================
-            # Reset cache se mudar preferências (exceto interface)
-            # =========================
             prefs_to_check = ["provider", "api_key", "unit", "location_mode", "static_location"]
             prefs = {k: extension.preferences.get(k) for k in prefs_to_check}
+
+            # =========================
+            # Limpa cache se mudar preferências (incluindo unidade)
+            # =========================
             if prefs != extension.last_preferences:
                 extension.cache = {}
                 save_cache(extension.base_path, extension.cache)
@@ -201,7 +214,7 @@ class WeatherListener(EventListener):
             # Localização automática
             # =========================
             if not query and location_mode == "auto":
-                key = "auto"
+                key = f"auto_{unit}"
                 now = time.time()
                 if key in extension.cache and now - extension.cache[key]["ts"] < CACHE_TTL:
                     geo = extension.cache[key]["geo"]
@@ -215,9 +228,9 @@ class WeatherListener(EventListener):
                     return RenderResultListAction([
                         ExtensionResultItem(icon=extension.icon("icon.png"), name="Cidade não encontrada", on_enter=None)
                     ])
-                weather = WeatherService.fetch_weather_openmeteo(extension.session, lat, lon)
+                weather = WeatherService.fetch_weather_openmeteo(extension.session, lat, lon, unit)
                 if weather:
-                    extension.cache[key] = {"geo": geo, "data": weather, "ts": now}
+                    extension.cache[key] = {"geo": geo, "data": weather, "ts": now, "unit": unit}
                     save_cache(extension.base_path, extension.cache)
                 else:
                     return RenderResultListAction([
@@ -228,32 +241,46 @@ class WeatherListener(EventListener):
             # Localização manual ou pesquisa por cidade
             # =========================
             elif query or location_mode == "manual":
-                key = query.lower() if query else "manual"
-                city = query if query else extension.preferences.get("static_location") or ""
+                key = f"{query.lower()}_{unit}" if query else f"manual_{unit}"
+                city_query = query if query else extension.preferences.get("static_location") or ""
+                auto_geo = WeatherService.fetch_location(extension.session)
+                auto_lat, auto_lon = auto_geo.get("latitude"), auto_geo.get("longitude")
+
+                # Verifica cache
                 if key in extension.cache and time.time() - extension.cache[key]["ts"] < CACHE_TTL:
                     geo = extension.cache[key]["geo"]
                     weather = extension.cache[key]["data"]
                     return self.render({**geo, **weather}, extension, interface_mode)
 
-                # Usar geocoding Open-Meteo
-                r = extension.session.get(f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1", timeout=5)
+                # Buscar cidade no geocoding Open-Meteo
+                r = extension.session.get(f"https://geocoding-api.open-meteo.com/v1/search?name={city_query}&count=5", timeout=5)
                 results = r.json().get("results")
                 if not results:
                     return RenderResultListAction([
                         ExtensionResultItem(icon=extension.icon("icon.png"), name="Cidade não encontrada", on_enter=None)
                     ])
-                lat = results[0]["latitude"]
-                lon = results[0]["longitude"]
+
+                # Seleciona a cidade mais próxima da localização atual
+                best = results[0]
+                if auto_lat is not None and auto_lon is not None:
+                    best_dist = haversine(auto_lat, auto_lon, best["latitude"], best["longitude"])
+                    for r_city in results[1:]:
+                        d = haversine(auto_lat, auto_lon, r_city["latitude"], r_city["longitude"])
+                        if d < best_dist:
+                            best_dist = d
+                            best = r_city
+
                 geo = {
-                    "city": results[0]["name"],
-                    "region": results[0].get("admin1", ""),
-                    "country": results[0].get("country_code", "BR"),
-                    "latitude": lat,
-                    "longitude": lon,
+                    "city": best["name"],
+                    "region": best.get("admin1", ""),
+                    "country": best.get("country_code", "BR"),
+                    "latitude": best["latitude"],
+                    "longitude": best["longitude"],
                     "provider": "Open-Meteo"
                 }
-                weather = WeatherService.fetch_weather_openmeteo(extension.session, lat, lon)
-                extension.cache[key] = {"geo": geo, "data": weather, "ts": time.time()}
+
+                weather = WeatherService.fetch_weather_openmeteo(extension.session, geo["latitude"], geo["longitude"], unit)
+                extension.cache[key] = {"geo": geo, "data": weather, "ts": time.time(), "unit": unit}
                 save_cache(extension.base_path, extension.cache)
 
             return self.render({**geo, **weather}, extension, interface_mode)
