@@ -5,7 +5,7 @@
 
 **UWeather** is a fast, lightweight weather extension for [Ulauncher](https://ulauncher.io/). It uses the free [Open-Meteo API](https://open-meteo.com/) to provide current weather and a 3‑day forecast. The extension supports automatic location detection, manual city selection, and multiple interface styles. Translations are included for several languages.
 
-![Screenshot](images/screenshot.png) *You can add a screenshot later*
+![Screenshot](images/uweather.gif)
 
 ## ✨ Features
 
