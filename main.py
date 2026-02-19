@@ -4,7 +4,7 @@ import time
 import os
 import threading
 import json
-import locale # Importado para detectar o idioma do sistema
+import locale
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -35,14 +35,13 @@ def create_session():
 # UTILITÁRIOS
 # ==============================
 def get_system_language():
-    """Detecta o idioma do sistema para formatar a URL do Weather.com"""
     try:
-        lang = locale.getdefaultlocale()[0] # ex: 'pt_BR'
+        lang = locale.getdefaultlocale()[0]
         if lang:
             return lang.replace('_', '-')
     except:
         pass
-    return "en-US" # Fallback
+    return "en-US"
 
 def country_flag(country_code):
     if not country_code or len(country_code) != 2:
@@ -74,7 +73,7 @@ def convert_temperature(temp, unit):
     return int(temp)
 
 # ==============================
-# OPEN-METEO CÓDIGOS
+# MAPEAMENTO DE CÓDIGOS
 # ==============================
 OPEN_METEO_WEATHER_CODES = {
     0: "céu limpo", 1: "parcialmente nublado", 2: "nublado", 3: "nublado",
@@ -87,6 +86,17 @@ OPEN_METEO_WEATHER_CODES = {
     96: "trovoada com granizo", 99: "trovoada com granizo intenso"
 }
 
+def get_owm_description(code):
+    if 200 <= code <= 232: return "tempestade"
+    if 300 <= code <= 321: return "garoa"
+    if 500 <= code <= 531: return "chuva"
+    if 600 <= code <= 622: return "neve"
+    if 701 <= code <= 781: return "neblina"
+    if code == 800: return "céu limpo"
+    if code == 801: return "poucas nuvens"
+    if 802 <= code <= 804: return "nublado"
+    return "desconhecido"
+
 # ==============================
 # WEATHER SERVICE
 # ==============================
@@ -94,22 +104,21 @@ class WeatherService:
     @staticmethod
     def fetch_location(session):
         apis = [
-            ("https://ip-api.com/json/", "ip-api.com", 2),
-            ("https://freeipapi.com/api/json", "freeipapi.com", 2),
-            ("https://ipapi.co/json/", "ipapi.co", 2)
+            ("https://ip-api.com/json/", 2),
+            ("https://freeipapi.com/api/json", 2),
+            ("https://ipapi.co/json/", 2)
         ]
-        for url, name, timeout in apis:
+        for url, timeout in apis:
             try:
                 r = session.get(url, timeout=timeout)
                 if r.status_code != 200: continue
                 data = r.json()
-                geo = {
+                return {
                     "city": data.get("city") or data.get("cityName") or "Desconhecida",
                     "country": (data.get("countryCode") or data.get("country_code") or "BR")[:2],
                     "latitude": data.get("lat") or data.get("latitude"),
                     "longitude": data.get("lon") or data.get("longitude")
                 }
-                return geo
             except: continue
         return None
 
@@ -139,7 +148,44 @@ class WeatherService:
                 "forecast": forecast
             }
         except Exception as e:
-            logger.error(f"Erro clima: {e}")
+            logger.error(f"Erro Open-Meteo: {e}")
+            return None
+
+    @staticmethod
+    def fetch_weather_openweather(session, lat, lon, api_key, unit="c"):
+        try:
+            u = "metric" if unit == "c" else "imperial"
+            # Usando API 2.5 Weather + Forecast para manter compatibilidade com chaves gratuitas
+            r_curr = session.get(f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={api_key}&units={u}", timeout=5)
+            data_curr = r_curr.json()
+            
+            if r_curr.status_code != 200:
+                logger.error(f"OWM Error: {data_curr.get('message')}")
+                return None
+
+            # Forecast para pegar min/max de amanhã (índice 8 costuma ser ~24h depois em passos de 3h)
+            r_fore = session.get(f"https://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={api_key}&units={u}", timeout=5)
+            data_fore = r_fore.json()
+            
+            forecast = []
+            if r_fore.status_code == 200 and "list" in data_fore:
+                # Pegamos o primeiro item da lista (próximo período) como forecast simples
+                f_day = data_fore["list"][8] if len(data_fore["list"]) > 8 else data_fore["list"][0]
+                forecast.append({
+                    "max": int(f_day["main"]["temp_max"]),
+                    "min": int(f_day["main"]["temp_min"]),
+                    "desc": get_owm_description(f_day["weather"][0]["id"])
+                })
+
+            return {
+                "current": {
+                    "temp": int(data_curr["main"]["temp"]),
+                    "desc": get_owm_description(data_curr["weather"][0]["id"])
+                },
+                "forecast": forecast
+            }
+        except Exception as e:
+            logger.error(f"Erro OpenWeather: {e}")
             return None
 
 # ==============================
@@ -158,13 +204,27 @@ class UWeather(Extension):
         path = os.path.join(self.base_path, "images", filename)
         return path if os.path.exists(path) else os.path.join(self.base_path, "images", "icon.png")
 
+    def get_weather_data(self, lat, lon, unit):
+        """ESTRITAMENTE seleciona o provedor das preferências"""
+        api_choice = (self.preferences.get("weather_api") or "open-meteo").lower()
+        
+        if api_choice == "openweather":
+            api_key = self.preferences.get("weather_api_key")
+            if not api_key:
+                return {"error": "API Key ausente"}
+            return WeatherService.fetch_weather_openweather(self.session, lat, lon, api_key, unit)
+        
+        # Fallback apenas se a escolha for explicitamente open-meteo
+        return WeatherService.fetch_weather_openmeteo(self.session, lat, lon, unit)
+
     def preload_weather(self):
         geo = WeatherService.fetch_location(self.session)
         if geo:
             unit = (self.preferences.get("unit") or "c").lower()
-            weather = WeatherService.fetch_weather_openmeteo(self.session, geo["latitude"], geo["longitude"], unit)
-            if weather:
-                self.cache[f"auto_{unit}"] = {"geo": geo, "data": weather, "ts": time.time()}
+            weather = self.get_weather_data(geo["latitude"], geo["longitude"], unit)
+            if weather and "error" not in weather:
+                api_choice = (self.preferences.get("weather_api") or "open-meteo").lower()
+                self.cache[f"auto_{api_choice}_{unit}"] = {"geo": geo, "data": weather, "ts": time.time()}
                 save_cache(self.base_path, self.cache)
 
 # ==============================
@@ -175,43 +235,49 @@ class WeatherListener(EventListener):
         unit = (extension.preferences.get("unit") or "c").lower()
         mode = (extension.preferences.get("location_mode") or "auto").lower()
         interface = (extension.preferences.get("interface_mode") or "complete").lower()
+        api_choice = (extension.preferences.get("weather_api") or "open-meteo").lower()
         query = (event.get_argument() or "").strip()
         
         geo = None
-        key = None
-
+        
+        # Chave de cache agora é segregada por API obrigatoriamente
         if not query and mode == "auto":
-            key = f"auto_{unit}"
+            key = f"auto_{api_choice}_{unit}"
             if key in extension.cache and time.time() - extension.cache[key]["ts"] < CACHE_TTL:
                 return self.render(extension.cache[key], extension, interface)
             geo = WeatherService.fetch_location(extension.session)
         elif query or mode == "manual":
             city_name = query if query else extension.preferences.get("static_location") or ""
-            key = f"{city_name.lower()}_{unit}"
+            key = f"{city_name.lower()}_{api_choice}_{unit}"
             if key in extension.cache and time.time() - extension.cache[key]["ts"] < CACHE_TTL:
                 return self.render(extension.cache[key], extension, interface)
             
-            r = extension.session.get(f"https://geocoding-api.open-meteo.com/v1/search?name={city_name}&count=1")
-            res = r.json().get("results")
-            if res:
-                geo = {"city": res[0]["name"], "country": res[0].get("country_code", "BR"), "latitude": res[0]["latitude"], "longitude": res[0]["longitude"]}
+            # Geocoding (Sempre via Open-Meteo Geocoding que é gratuito e sem key)
+            try:
+                r = extension.session.get(f"https://geocoding-api.open-meteo.com/v1/search?name={city_name}&count=1")
+                res = r.json().get("results")
+                if res:
+                    geo = {"city": res[0]["name"], "country": res[0].get("country_code", "BR"), "latitude": res[0]["latitude"], "longitude": res[0]["longitude"]}
+            except: pass
 
         if geo:
-            weather = WeatherService.fetch_weather_openmeteo(extension.session, geo["latitude"], geo["longitude"], unit)
+            weather = extension.get_weather_data(geo["latitude"], geo["longitude"], unit)
+            
             if weather:
+                if isinstance(weather, dict) and "error" in weather:
+                    return RenderResultListAction([ExtensionResultItem(icon=extension.icon("icon.png"), name=weather["error"], description="Verifique as configurações da extensão", on_enter=None)])
+                
                 data = {"geo": geo, "data": weather, "ts": time.time()}
                 extension.cache[key] = data
                 save_cache(extension.base_path, extension.cache)
                 return self.render(data, extension, interface)
 
-        return RenderResultListAction([ExtensionResultItem(icon=extension.icon("icon.png"), name="Cidade não encontrada", on_enter=None)])
+        return RenderResultListAction([ExtensionResultItem(icon=extension.icon("icon.png"), name="Localização ou dados não disponíveis", description=f"Provedor atual: {api_choice}", on_enter=None)])
 
     def render(self, cached_item, extension, interface_mode):
         geo = cached_item["geo"]
         weather = cached_item["data"]
-        
-        # Lógica de idioma para o Weather.com
-        lang = get_system_language() # ex: pt-BR
+        lang = get_system_language()
         url = f"https://weather.com/{lang}/weather/today/l/{geo['latitude']},{geo['longitude']}"
 
         temp = weather["current"]["temp"]
@@ -221,7 +287,7 @@ class WeatherListener(EventListener):
 
         if interface_mode == "complete":
             f = weather.get("forecast", [])
-            desc_text = f"Amanhã: {f[0]['min']}º/{f[0]['max']}º" if f else "Clique para abrir no navegador"
+            desc_text = f"Amanhã: {f[0]['min']}º/{f[0]['max']}º" if f else "Clique para ver detalhes"
             item = ExtensionResultItem(icon=extension.icon("icon.png"), name=title, description=desc_text, on_enter=OpenUrlAction(url))
         elif interface_mode == "essential":
             item = ExtensionResultItem(icon=extension.icon("icon.png"), name=f"{temp}º, {desc}", description=f"{geo['city']} {flag}", on_enter=OpenUrlAction(url))
