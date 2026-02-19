@@ -124,10 +124,12 @@ class WeatherService:
         raise Exception("Não foi possível obter sua localização atual")
 
     @staticmethod
-    def fetch_weather_openweather(session, api_key, city=None, unit="c"):
-        if not city:
-            raise Exception("cidade não encontrada")
-        url = f"https://api.openweathermap.org/data/2.5/forecast?q={city}&appid={api_key}&units={'metric' if unit == 'c' else 'imperial'}&lang=pt_br"
+    def fetch_weather_openweather(session, api_key, city=None, lat=None, lon=None, unit="c"):
+        if city:
+            url = f"https://api.openweathermap.org/data/2.5/forecast?q={city}&appid={api_key}&units={'metric' if unit == 'c' else 'imperial'}&lang=pt_br"
+        else:
+            url = f"https://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={api_key}&units={'metric' if unit == 'c' else 'imperial'}&lang=pt_br"
+
         r = session.get(url, timeout=5)
         data = r.json()
         if r.status_code == 401:
@@ -137,17 +139,19 @@ class WeatherService:
         return WeatherService.parse_weather(data)
 
     @staticmethod
-    def fetch_weather_openmeteo(session, city=None, unit="c"):
-        if not city:
-            raise Exception("cidade não encontrada")
-        r = session.get(f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1", timeout=5)
-        geo = r.json().get("results")
-        if not geo:
-            raise Exception("cidade não encontrada")
-        lat = geo[0]["latitude"]
-        lon = geo[0]["longitude"]
-        city_name = geo[0]["name"]
-        country = geo[0]["country_code"]
+    def fetch_weather_openmeteo(session, city=None, lat=None, lon=None, unit="c"):
+        if city and not lat and not lon:
+            r = session.get(f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1", timeout=5)
+            geo = r.json().get("results")
+            if not geo:
+                raise Exception("cidade não encontrada")
+            lat = geo[0]["latitude"]
+            lon = geo[0]["longitude"]
+            city_name = geo[0]["name"]
+            country = geo[0]["country_code"]
+        else:
+            city_name = city or "Desconhecida"
+            country = "BR"
 
         r = session.get(
             f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
@@ -243,11 +247,11 @@ class UWeather(Extension):
             if not api_key:
                 return
             geo = WeatherService.fetch_location(self.session)
-            city_name = geo.get("city", "Desconhecida")
             data = WeatherService.fetch_weather_openweather(
                 self.session,
                 api_key,
-                city=city_name
+                lat=geo["latitude"],
+                lon=geo["longitude"]
             )
             self.cache["auto"] = {"data": data, "ts": time.time()}
             save_cache(self.base_path, self.cache)
@@ -265,6 +269,7 @@ class WeatherListener(EventListener):
             api_key = (extension.preferences.get("api_key") or "").lower()
             unit = (extension.preferences.get("unit") or "c").lower()
             location_mode = (extension.preferences.get("location_mode") or "auto").lower()
+            static_location = (extension.preferences.get("static_location") or "").lower()
             interface_mode = (extension.preferences.get("interface_mode") or "complete").lower()
 
             query = (event.get_argument() or "").strip().lower()
@@ -288,9 +293,8 @@ class WeatherListener(EventListener):
                         return self.render(data, extension, interface_mode)
                 try:
                     geo = WeatherService.fetch_location(extension.session)
-                    city_name = geo.get("city", "Desconhecida")
-                    query = city_name  # força o uso da cidade exata
                 except Exception:
+                    # Sem internet e sem cache
                     if "auto" in extension.cache:
                         data = extension.cache["auto"]["data"]
                         return self.render(data, extension, interface_mode)
@@ -301,9 +305,10 @@ class WeatherListener(EventListener):
                             on_enter=None
                         )
                     ])
-            elif not query:
-                key = "manual"
-                query = extension.preferences.get("static_location") or ""
+
+            elif not query and location_mode == "manual" and static_location:
+                query = static_location
+                key = query.lower()
             else:
                 key = query.lower()
 
@@ -317,16 +322,24 @@ class WeatherListener(EventListener):
             # Buscar clima
             try:
                 if provider == "openweather":
-                    data = WeatherService.fetch_weather_openweather(
-                        extension.session, api_key, city=query, unit=unit
-                    )
+                    if query:
+                        data = WeatherService.fetch_weather_openweather(
+                            extension.session, api_key, city=query, unit=unit)
+                    else:
+                        data = WeatherService.fetch_weather_openweather(
+                            extension.session, api_key, lat=geo["latitude"], lon=geo["longitude"], unit=unit)
                 else:
                     data = WeatherService.fetch_weather_openmeteo(
-                        extension.session, city=query, unit=unit
+                        extension.session,
+                        city=query,
+                        lat=geo["latitude"] if geo else None,
+                        lon=geo["longitude"] if geo else None,
+                        unit=unit
                     )
             except Exception as e:
                 msg = str(e).lower()
-                if "api key" in msg:
+                # API key inválida sempre independente
+                if "api key" in msg or "invalid api key" in msg:
                     return RenderResultListAction([
                         ExtensionResultItem(
                             icon=extension.icon("error.png"),
@@ -334,7 +347,8 @@ class WeatherListener(EventListener):
                             on_enter=None
                         )
                     ])
-                if "cidade não encontrada" in msg:
+                # Cidade não encontrada
+                if "cidade não encontrada" in msg or "city not found" in msg:
                     return RenderResultListAction([
                         ExtensionResultItem(
                             icon=extension.icon("icon.png"),
@@ -342,6 +356,7 @@ class WeatherListener(EventListener):
                             on_enter=None
                         )
                     ])
+                # Qualquer outro erro
                 return RenderResultListAction([
                     ExtensionResultItem(
                         icon=extension.icon("error.png"),
@@ -370,7 +385,7 @@ class WeatherListener(EventListener):
         country = data.get("country") or "BR"
         flag = country_flag(country)
         temp = data["current"]["temp"]
-        desc = data["current"].get("desc", "desconhecido")
+        desc = data["current"].get("desc", "desconhecido")  # minúscula
         forecast = data.get("forecast", [])
 
         items = []
