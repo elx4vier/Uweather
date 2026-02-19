@@ -423,5 +423,3 @@ class WeatherListener(EventListener):
 
 if __name__ == "__main__":
     UWeather().run()
-
-temos um problema, estou numa cidade que tem o mesmo nome de uma cidade de portugal (estou no brasil), vamos resolver isso, usando uma lógica de proximidade, baseado na minha localização, a extensão me retorna a cidade correta 
