@@ -18,7 +18,7 @@ Translations are included for multiple languages.
 - **Manual location** – set a fixed city in preferences.
 - **City search** – type a city name after the keyword to get weather for that location.
 - **Temperature unit** – Celsius or Fahrenheit.
-- **Three display modes** – choose how much information you see (see table below).
+- **Three display modes** – choose how much information you see.
 - **Localised descriptions** – translations for:
   - English (en)
   - Portuguese (pt)
@@ -91,31 +91,6 @@ Translation files are stored in `translations/` and are simple JSON files. To ad
 - Python 3.6 or later
 - `requests` and `urllib3` (usually installed by default with Ulauncher)
 
-### Project Structure
-
-```
-ulauncher-uweather/
-├── images/               # Icons and demo GIF (uweather.gif)
-├── translations/         # JSON translation files (en.json, pt.json, es.json, etc.)
-├── main.py               # Extension entry point
-├── manifest.json         # Ulauncher manifest
-├── cache_weather.json    # Cache file (auto‑generated)
-├── README.md
-└── LICENSE
-```
-
-The extension uses requests with retry logic and caches location/weather data to reduce API load.
-
-### Testing
-
-You can run Ulauncher in debug mode to test the extension:
-
-```bash
-ulauncher --no-extensions --dev -v
-```
-
-Then enable the extension from the development directory.
-
 ## 🤝 Contributing
 
 - Report bugs or suggest features via GitHub Issues.
@@ -131,5 +106,5 @@ This project is licensed under the MIT License – see the LICENSE file for deta
 - Open-Meteo for the free weather API.
 - ip-api.com and freeipapi.com for IP geolocation.
 - Ulauncher team for the awesome launcher.
-- Weather icons adapted from the Papirus Icon theme. [Papirus Icon Theme](https://github.com/PapirusDevelopmentTeam/papirus-icon-theme)
+- Weather icons from the [Papirus Icon Theme](https://github.com/PapirusDevelopmentTeam/papirus-icon-theme)
 
