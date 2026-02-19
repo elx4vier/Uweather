@@ -115,6 +115,7 @@ class WeatherService:
                 data = r.json()
                 return {
                     "city": data.get("city") or data.get("cityName") or "Desconhecida",
+                    "state": data.get("region") or "",
                     "country": (data.get("countryCode") or data.get("country_code") or "BR")[:2],
                     "latitude": data.get("lat") or data.get("latitude"),
                     "longitude": data.get("lon") or data.get("longitude")
@@ -231,44 +232,61 @@ class WeatherListener(EventListener):
         provider = (extension.preferences.get("provider") or "open-meteo").lower()
         query = (event.get_argument() or "").strip()
         
-        geo = None
         key = None
-        
+
         if not query and mode == "auto":
             key = f"auto_{provider}_{unit}"
             if key in extension.cache and time.time() - extension.cache[key]["ts"] < CACHE_TTL:
                 return self.render(extension.cache[key], extension, interface)
             geo = WeatherService.fetch_location(extension.session)
-        elif query or mode == "manual":
-            city_name = query if query else extension.preferences.get("static_location") or ""
-            key = f"{city_name.lower()}_{provider}_{unit}"
-            if key in extension.cache and time.time() - extension.cache[key]["ts"] < CACHE_TTL:
-                return self.render(extension.cache[key], extension, interface)
-            
-            try:
-                r = extension.session.get(f"https://geocoding-api.open-meteo.com/v1/search?name={city_name}&count=1")
-                res = r.json().get("results")
-                if res:
-                    geo = {"city": res[0]["name"], "country": res[0].get("country_code", "BR"),
-                           "latitude": res[0]["latitude"], "longitude": res[0]["longitude"]}
-            except: pass
+            if geo:
+                weather = extension.get_weather_data(geo["latitude"], geo["longitude"], unit)
+                if weather and "error" not in weather:
+                    data = {"geo": geo, "data": weather, "ts": time.time()}
+                    extension.cache[key] = data
+                    save_cache(extension.base_path, extension.cache)
+                    return self.render(data, extension, interface)
+        else:
+            city_query = query if query else extension.preferences.get("static_location") or ""
+            city_name, country_filter = city_query, None
+            if "," in city_query:
+                parts = [p.strip() for p in city_query.split(",")]
+                city_name = parts[0]
+                if len(parts) > 1:
+                    country_filter = parts[1].upper()
 
-        if geo:
-            weather = extension.get_weather_data(geo["latitude"], geo["longitude"], unit)
-            
-            if weather:
-                if isinstance(weather, dict) and "error" in weather:
-                    return RenderResultListAction([
-                        ExtensionResultItem(icon=extension.icon("icon.png"),
-                                            name=weather["error"],
-                                            description="Verifique as configurações da extensão",
-                                            on_enter=None)
-                    ])
-                
-                data = {"geo": geo, "data": weather, "ts": time.time()}
-                extension.cache[key] = data
-                save_cache(extension.base_path, extension.cache)
-                return self.render(data, extension, interface)
+            try:
+                r = extension.session.get(f"https://geocoding-api.open-meteo.com/v1/search?name={city_name}&count=5")
+                results = r.json().get("results", [])
+
+                if country_filter:
+                    results = [res for res in results if res.get("country_code", "").upper() == country_filter]
+
+                cities = []
+                for res in results[:3]:
+                    geo = {
+                        "city": res.get("name"),
+                        "state": res.get("admin1", ""),
+                        "country": res.get("country_code", "BR"),
+                        "latitude": res.get("latitude"),
+                        "longitude": res.get("longitude")
+                    }
+                    cities.append(geo)
+
+                items = []
+                for geo in cities:
+                    weather = extension.get_weather_data(geo["latitude"], geo["longitude"], unit)
+                    if weather and "error" not in weather:
+                        data = {"geo": geo, "data": weather, "ts": time.time()}
+                        extension.cache[f"{geo['city'].lower()}_{provider}_{unit}"] = data
+                        save_cache(extension.base_path, extension.cache)
+                        items.append(self.render(data, extension, interface, return_item=True))
+
+                if items:
+                    return RenderResultListAction(items)
+
+            except Exception as e:
+                logger.error(f"Erro geocoding: {e}")
 
         return RenderResultListAction([
             ExtensionResultItem(icon=extension.icon("icon.png"),
@@ -277,7 +295,7 @@ class WeatherListener(EventListener):
                                 on_enter=None)
         ])
 
-    def render(self, cached_item, extension, interface_mode):
+    def render(self, cached_item, extension, interface_mode, return_item=False):
         geo = cached_item["geo"]
         weather = cached_item["data"]
         lang = get_system_language()
@@ -286,18 +304,37 @@ class WeatherListener(EventListener):
         temp = weather["current"]["temp"]
         desc = weather["current"]["desc"]
         flag = country_flag(geo['country'])
-        title = f"{geo['city']}, {geo['country']} {flag} — {temp}º, {desc}"
+
+        # Exibição Cidade + Estado (sigla) + bandeira
+        if geo.get("state"):
+            location_text = f"{geo['city']}, {geo['state']} {flag}"
+        else:
+            location_text = f"{geo['city']} {flag}"
 
         if interface_mode == "complete":
             f = weather.get("forecast", [])
             desc_text = f"Amanhã: {f[0]['min']}º/{f[0]['max']}º" if f else "Clique para ver detalhes"
-            item = ExtensionResultItem(icon=extension.icon("icon.png"), name=title, description=desc_text, on_enter=OpenUrlAction(url))
+            item = ExtensionResultItem(
+                icon=extension.icon("icon.png"),
+                name=f"{location_text} — {temp}º, {desc}",
+                description=desc_text,
+                on_enter=OpenUrlAction(url)
+            )
         elif interface_mode == "essential":
-            item = ExtensionResultItem(icon=extension.icon("icon.png"), name=f"{temp}º, {desc}", description=f"{geo['city']} {flag}", on_enter=OpenUrlAction(url))
+            item = ExtensionResultItem(
+                icon=extension.icon("icon.png"),
+                name=f"{temp}º, {desc}",
+                description=location_text,
+                on_enter=OpenUrlAction(url)
+            )
         else:
-            item = ExtensionSmallResultItem(icon=extension.icon("icon.png"), name=f"{temp}º – {geo['city']} {flag}", on_enter=OpenUrlAction(url))
+            item = ExtensionSmallResultItem(
+                icon=extension.icon("icon.png"),
+                name=f"{temp}º – {location_text}",
+                on_enter=OpenUrlAction(url)
+            )
 
-        return RenderResultListAction([item])
+        return item if return_item else RenderResultListAction([item])
 
 if __name__ == "__main__":
     UWeather().run()
