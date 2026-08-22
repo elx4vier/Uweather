@@ -1,0 +1,13 @@
+[project]
+name = "uweather"
+version = "1.0.0"
+description = "Weather extension for Ulauncher using Open-Meteo"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+dependencies = [
+    "requests>=2.31",
+]
+
+[tool.uv]
+package = false
