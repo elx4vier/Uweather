@@ -5,7 +5,6 @@ import os
 import json
 import locale
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -43,14 +42,14 @@ def country_flag(code):
     return chr(ord(code[0].upper()) + offset) + chr(ord(code[1].upper()) + offset)
 
 OPEN_METEO_CODES = {
-    0: "céu limpo", 1: "parcialmente nublado", 2: "nublado", 3: "nublado",
-    45: "neblina", 48: "neblina com gelo", 51: "chuva fraca", 53: "chuva moderada",
-    55: "chuva forte", 56: "chuva congelante fraca", 57: "chuva congelante forte",
-    61: "chuva", 63: "chuva forte", 65: "chuva intensa", 66: "chuva congelante leve",
-    67: "chuva congelante intensa", 71: "neve fraca", 73: "neve moderada",
-    75: "neve intensa", 77: "granizo", 80: "chuva forte", 81: "chuva intensa",
-    82: "chuva intensa", 85: "neve leve", 86: "neve intensa", 95: "trovoada",
-    96: "trovoada com granizo", 99: "trovoada com granizo intenso"
+    0: "clear sky", 1: "partly cloudy", 2: "cloudy", 3: "overcast",
+    45: "fog", 48: "depositing rime fog", 51: "light drizzle", 53: "moderate drizzle",
+    55: "dense drizzle", 56: "light freezing drizzle", 57: "dense freezing drizzle",
+    61: "light rain", 63: "moderate rain", 65: "heavy rain", 66: "light freezing rain",
+    67: "heavy freezing rain", 71: "light snow", 73: "moderate snow",
+    75: "heavy snow", 77: "snow grains", 80: "light rain showers", 81: "moderate rain showers",
+    82: "violent rain showers", 85: "light snow showers", 86: "heavy snow showers", 95: "thunderstorm",
+    96: "thunderstorm with slight hail", 99: "thunderstorm with heavy hail"
 }
 
 class WeatherService:
@@ -63,7 +62,7 @@ class WeatherService:
                 if r.status_code == 200:
                     data = r.json()
                     return {
-                        "city": data.get("city") or data.get("cityName") or "Desconhecida",
+                        "city": data.get("city") or data.get("cityName") or "Unknown",
                         "state": data.get("regionName") or data.get("region") or "",
                         "country": (data.get("countryCode") or data.get("country_code") or "BR")[:2],
                         "latitude": data.get("lat") or data.get("latitude"),
@@ -101,7 +100,7 @@ class WeatherService:
             return {
                 "current": {
                     "temp": temp,
-                    "desc": OPEN_METEO_CODES.get(current.get("weathercode", 0), "desconhecido").lower(),
+                    "desc": OPEN_METEO_CODES.get(current.get("weathercode", 0), "unknown").lower(),
                     "weathercode": current.get("weathercode", 0)
                 },
                 "forecast": forecast
@@ -135,7 +134,7 @@ class UWeather(Extension):
         path = os.path.join(self.base_path, "images", filename)
         return path if os.path.exists(path) else os.path.join(self.base_path, "images", "icon.png")
 
-    # ===== NOVO: função de ícone baseada em clima e horário =====
+    # ===== NEW: icon function based on weather and time of day =====
     def weather_icon(self, weather_code, is_night=False):
         code_map = {
             0: "weather-clear",
@@ -229,7 +228,7 @@ class WeatherListener(EventListener):
         query = (event.get_argument() or "").strip()
 
         if mode == "manual" and not static_city:
-            return RenderResultListAction([ExtensionResultItem(icon=extension.icon("error.png"), name="Localização não encontrada", on_enter=None)])
+            return RenderResultListAction([ExtensionResultItem(icon=extension.icon("error.png"), name="Location not found", on_enter=None)])
 
         if not query:
             cache_valid = False
@@ -241,7 +240,7 @@ class WeatherListener(EventListener):
             if not cache_valid or (time.time() - extension.cache["data"]["ts"] > CACHE_TTL):
                 success = extension.update_location()
                 if not success:
-                    return RenderResultListAction([ExtensionResultItem(icon=extension.icon("icon.png"), name="Buscando informações meteorológicas...", on_enter=None)])
+                    return RenderResultListAction([ExtensionResultItem(icon=extension.icon("icon.png"), name="Fetching weather information...", on_enter=None)])
             
             return self.render(extension.cache["data"], extension, interface)
 
@@ -253,7 +252,7 @@ class WeatherListener(EventListener):
                                      params={"name": query, "count": 3}, timeout=5)
             results = r.json().get("results", [])
             if not results:
-                return RenderResultListAction([ExtensionResultItem(icon=extension.icon("icon.png"), name="Cidade não encontrada", on_enter=None)])
+                return RenderResultListAction([ExtensionResultItem(icon=extension.icon("icon.png"), name="City not found", on_enter=None)])
 
             items = []
             for res in results:
@@ -265,7 +264,7 @@ class WeatherListener(EventListener):
                     items.append(self.render(item_data, extension, interface, return_item=True))
             return RenderResultListAction(items)
         except:
-            return RenderResultListAction([ExtensionResultItem(icon=extension.icon("error.png"), name="Erro na busca", on_enter=None)])
+            return RenderResultListAction([ExtensionResultItem(icon=extension.icon("error.png"), name="Search error", on_enter=None)])
 
     def render(self, item_data, extension, interface_mode, return_item=False):
         geo, weather = item_data["geo"], item_data["weather"]
@@ -284,7 +283,7 @@ class WeatherListener(EventListener):
 
         if interface_mode == "complete":
             f = weather.get("forecast", [])
-            line3 = f"Amanhã: {f[1]['min']}º / {f[1]['max']}º | Depois: {f[2]['min']}º / {f[2]['max']}º" if len(f) >= 3 else ""
+            line3 = f"Tomorrow: {f[1]['min']}º / {f[1]['max']}º | Later: {f[2]['min']}º / {f[2]['max']}º" if len(f) >= 3 else ""
             item = ExtensionResultItem(
                 icon=extension.icon(icon_file), 
                 name=loc_line, 
