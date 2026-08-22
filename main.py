@@ -36,6 +36,17 @@ def get_system_language():
     except Exception:
         return "en-US"
 
+def load_translations(base_path, lang):
+    lang = (lang or "en").lower()
+    path = os.path.join(base_path, "translations", f"{lang}.json")
+    if not os.path.exists(path):
+        path = os.path.join(base_path, "translations", "en.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
 def country_flag(code):
     if not code or len(code) != 2: return ""
     offset = 127397
@@ -100,7 +111,6 @@ class WeatherService:
             return {
                 "current": {
                     "temp": temp,
-                    "desc": OPEN_METEO_CODES.get(current.get("weathercode", 0), "unknown").lower(),
                     "weathercode": current.get("weathercode", 0)
                 },
                 "forecast": forecast
@@ -226,9 +236,10 @@ class WeatherListener(EventListener):
         interface = (extension.preferences.get("interface_mode") or "complete").lower()
         static_city = (extension.preferences.get("static_location") or "").strip()
         query = (event.get_argument() or "").strip()
+        t = load_translations(extension.base_path, extension.preferences.get("language"))
 
         if mode == "manual" and not static_city:
-            return RenderResultListAction([ExtensionResultItem(icon=extension.icon("error.png"), name="Location not found", on_enter=None)])
+            return RenderResultListAction([ExtensionResultItem(icon=extension.icon("error.png"), name=t.get("location_not_found", "Location not found"), on_enter=None)])
 
         if not query:
             cache_valid = False
@@ -240,19 +251,19 @@ class WeatherListener(EventListener):
             if not cache_valid or (time.time() - extension.cache["data"]["ts"] > CACHE_TTL):
                 success = extension.update_location()
                 if not success:
-                    return RenderResultListAction([ExtensionResultItem(icon=extension.icon("icon.png"), name="Fetching weather information...", on_enter=None)])
-            
-            return self.render(extension.cache["data"], extension, interface)
+                    return RenderResultListAction([ExtensionResultItem(icon=extension.icon("icon.png"), name=t.get("searching_weather", "Fetching weather information..."), on_enter=None)])
 
-        return self.search_city_weather(query, extension, unit, interface)
+            return self.render(extension.cache["data"], extension, interface, t)
 
-    def search_city_weather(self, query, extension, unit, interface):
+        return self.search_city_weather(query, extension, unit, interface, t)
+
+    def search_city_weather(self, query, extension, unit, interface, t):
         try:
             r = extension.session.get("https://geocoding-api.open-meteo.com/v1/search",
                                      params={"name": query, "count": 3}, timeout=5)
             results = r.json().get("results", [])
             if not results:
-                return RenderResultListAction([ExtensionResultItem(icon=extension.icon("icon.png"), name="City not found", on_enter=None)])
+                return RenderResultListAction([ExtensionResultItem(icon=extension.icon("icon.png"), name=t.get("city_not_found", "City not found"), on_enter=None)])
 
             items = []
             for res in results:
@@ -261,21 +272,22 @@ class WeatherListener(EventListener):
                     geo = {"city": res.get("name"), "state": res.get("admin1", ""), "country": res.get("country_code", "BR"),
                            "latitude": res.get("latitude"), "longitude": res.get("longitude")}
                     item_data = {"geo": geo, "weather": weather}
-                    items.append(self.render(item_data, extension, interface, return_item=True))
+                    items.append(self.render(item_data, extension, interface, t, return_item=True))
             return RenderResultListAction(items)
         except:
-            return RenderResultListAction([ExtensionResultItem(icon=extension.icon("error.png"), name="Search error", on_enter=None)])
+            return RenderResultListAction([ExtensionResultItem(icon=extension.icon("error.png"), name=t.get("search_error", "Search error"), on_enter=None)])
 
-    def render(self, item_data, extension, interface_mode, return_item=False):
+    def render(self, item_data, extension, interface_mode, t, return_item=False):
         geo, weather = item_data["geo"], item_data["weather"]
         lang = get_system_language()
         url = f"https://weather.com/{lang}/weather/today/l/{geo['latitude']},{geo['longitude']}"
-        temp, desc = weather["current"]["temp"], weather["current"]["desc"].lower()
+        temp = weather["current"]["temp"]
+        weather_code = weather["current"].get("weathercode", 0)
+        desc = t.get(f"weather_code.{weather_code}", OPEN_METEO_CODES.get(weather_code, "unknown")).lower()
         flag = country_flag(geo["country"])
-        
+
         now_hour = datetime.now().hour
         is_night = now_hour < 6 or now_hour >= 18
-        weather_code = weather["current"].get("weathercode", 0)
         icon_file = extension.weather_icon(weather_code, is_night)
 
         state_info = f", {geo['state']}" if geo['state'] else ""
@@ -283,27 +295,29 @@ class WeatherListener(EventListener):
 
         if interface_mode == "complete":
             f = weather.get("forecast", [])
-            line3 = f"Tomorrow: {f[1]['min']}º / {f[1]['max']}º | Later: {f[2]['min']}º / {f[2]['max']}º" if len(f) >= 3 else ""
+            tomorrow_label = t.get("tomorrow", "Tomorrow")
+            day_after_label = t.get("day_after", "Later")
+            line3 = f"{tomorrow_label}: {f[1]['min']}º / {f[1]['max']}º | {day_after_label}: {f[2]['min']}º / {f[2]['max']}º" if len(f) >= 3 else ""
             item = ExtensionResultItem(
-                icon=extension.icon(icon_file), 
-                name=loc_line, 
-                description=f"{temp}º, {desc}\n{line3}", 
+                icon=extension.icon(icon_file),
+                name=loc_line,
+                description=f"{temp}º, {desc}\n{line3}",
                 on_enter=OpenUrlAction(url)
             )
         elif interface_mode == "essential":
             item = ExtensionResultItem(
-                icon=extension.icon(icon_file), 
-                name=f"{temp}º, {desc}", 
-                description=loc_line, 
+                icon=extension.icon(icon_file),
+                name=f"{temp}º, {desc}",
+                description=loc_line,
                 on_enter=OpenUrlAction(url)
             )
         else:
             item = ExtensionSmallResultItem(
-                icon=extension.icon(icon_file), 
-                name=f"{temp}º – {loc_line} ({desc})", 
+                icon=extension.icon(icon_file),
+                name=f"{temp}º – {loc_line} ({desc})",
                 on_enter=OpenUrlAction(url)
             )
-        
+
         return item if return_item else RenderResultListAction([item])
 
 if __name__ == "__main__":

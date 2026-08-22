@@ -34,6 +34,22 @@
     },
 
     {
+      "id": "language",
+      "type": "select",
+      "name": "Language",
+      "description": "Language used for weather descriptions and messages.",
+      "default_value": "en",
+      "options": [
+        { "text": "English", "value": "en" },
+        { "text": "Deutsch", "value": "de" },
+        { "text": "Español", "value": "es" },
+        { "text": "Français", "value": "fr" },
+        { "text": "Português", "value": "pt" },
+        { "text": "Русский", "value": "ru" }
+      ]
+    },
+
+    {
       "id": "location_mode",
       "type": "select",
       "name": "Location Mode",
