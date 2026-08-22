@@ -41,6 +41,7 @@
       "default_value": "en",
       "options": [
         { "text": "English", "value": "en" },
+        { "text": "Čeština", "value": "cs" },
         { "text": "Deutsch", "value": "de" },
         { "text": "Español", "value": "es" },
         { "text": "Français", "value": "fr" },
